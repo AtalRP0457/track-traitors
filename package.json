@@ -1,0 +1,37 @@
+{
+  "name": "track-traitors",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "dev:party": "wrangler dev --ip 0.0.0.0 --port 1999",
+    "dev:all": "concurrently -n web,party -c blue,yellow \"npm run dev -- -H 0.0.0.0\" \"npm run dev:party\"",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p party"
+  },
+  "dependencies": {
+    "next": "^16.4.6",
+    "partyserver": "^0.5.10",
+    "partysocket": "^1.3.0",
+    "phaser": "^4.2.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "concurrently": "^10.0.7",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.1",
+    "wrangler": "^4.165.0"
+  }
+}

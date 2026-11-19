@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  --racer: #4da3ff;
+  --traitor: #ff7a1a;
+  --bg: #0b1d2a;
+  --fg: #f4f8fb;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  height: 100%;
+}
+
+/* Controller pages: no zoom, scroll, selection, callouts or pull-to-refresh while mashing buttons. */
+.controller {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}

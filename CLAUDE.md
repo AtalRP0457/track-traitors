@@ -23,8 +23,9 @@ Read PLAN.md before any task. It is the source of truth for game rules, architec
 
 ## Commands (fill in as the project grows)
 - Dev web: `npm run dev -- -H 0.0.0.0`
-- Dev room server: `npx wrangler dev` (or the script in package.json)
-- Tests: `npm test`
+- Dev room server: `npm run dev:party` (wrangler dev on port 1999, all interfaces)
+- Both at once: `npm run dev:all`
+- Tests: `npm test` · Typecheck: `npm run typecheck`
 
 ## Testing checklist for every controller change
 - Real iPhone (Safari) and real Android (Chrome)

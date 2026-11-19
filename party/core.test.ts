@@ -96,10 +96,12 @@ describe("RoomCore", () => {
     expect(r.timers.has(`seat:${a.pid}`)).toBe(true);
 
     r.msg("H", { t: "phase", phase: "race", laps: 2 });
+    r.msg("H", { t: "lap", p: a.pid, lap: 1, laps: 2 });
     r.room.connect("A2", "phone");
     r.msg("A2", { t: "join", pid: a.pid, seat: a.seat, name: "x", color: "x" });
     expect(r.last("A2", "welcome")).toMatchObject({ pid: a.pid, color: a.color });
     expect(r.last("A2", "phase").phase).toBe("race");
+    expect(r.last("A2", "lap").lap).toBe(1);
     expect(r.timers.has(`seat:${a.pid}`)).toBe(false);
   });
 

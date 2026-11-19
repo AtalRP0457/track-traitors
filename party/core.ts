@@ -19,6 +19,8 @@ interface Player {
   name: string;
   color: string;
   conn: string | null;
+  /** Laps completed this race, re-sent to a phone that reconnects mid-race. */
+  lap: number;
 }
 
 type ConnRole = { kind: "host" } | { kind: "phone"; pid: string | null };
@@ -95,7 +97,8 @@ export class RoomCore {
         if (!["lobby", "countdown", "race", "results"].includes(phase)) return;
         this.phase = phase;
         this.laps = Number(m.laps) || LAPS;
-        const msg = { v: 1, t: "phase", phase, laps: this.laps, endsAt: typeof m.endsAt === "number" ? m.endsAt : undefined } as const;
+        if (phase === "countdown") for (const p of this.players.values()) p.lap = 0;
+        const msg = { v: 1, t: "phase", phase, laps: this.laps, ms: typeof m.ms === "number" ? m.ms : undefined } as const;
         this.toPhones(msg);
         this.sendLobby();
         break;
@@ -106,9 +109,13 @@ export class RoomCore {
       case "ack":
         this.toPlayer(String(m.p), { v: 1, t: "ack", k: Number(m.k) });
         break;
-      case "lap":
-        this.toPlayer(String(m.p), { v: 1, t: "lap", p: String(m.p), lap: Number(m.lap), laps: Number(m.laps) });
+      case "lap": {
+        const p = this.players.get(String(m.p));
+        if (!p) return;
+        p.lap = Number(m.lap) || 0;
+        this.toPlayer(p.pid, { v: 1, t: "lap", p: p.pid, lap: p.lap, laps: this.laps });
         break;
+      }
       case "result":
         if (Array.isArray(m.places)) this.toPhones({ v: 1, t: "result", places: m.places as { pid: string; ms: number | null }[] });
         break;
@@ -163,11 +170,13 @@ export class RoomCore {
       this.io.clearTimer(`seat:${existing.pid}`);
       this.io.send(connId, { v: 1, t: "welcome", pid: existing.pid, seat: existing.seat, name: existing.name, color: existing.color });
       this.io.send(connId, { v: 1, t: "phase", phase: this.phase, laps: this.laps });
+      if (this.phase === "race") this.io.send(connId, { v: 1, t: "lap", p: existing.pid, lap: existing.lap, laps: this.laps });
       this.sendLobby();
       return;
     }
 
-    if (this.phase !== "lobby") {
+    // New players can join in the lobby or while results are showing (they race next time).
+    if (this.phase !== "lobby" && this.phase !== "results") {
       this.io.send(connId, { v: 1, t: "error", code: "started", msg: "This race already started. Join the next one!" });
       return;
     }
@@ -181,7 +190,7 @@ export class RoomCore {
     const want = typeof m.color === "string" ? m.color : "";
     const color = CAR_COLORS.includes(want) && !taken.has(want) ? want : CAR_COLORS.find((c) => !taken.has(c))!;
 
-    const p: Player = { pid: "p" + this.io.randomId(), seat: this.io.randomId() + this.io.randomId(), name, color, conn: connId };
+    const p: Player = { pid: "p" + this.io.randomId(), seat: this.io.randomId() + this.io.randomId(), name, color, conn: connId, lap: 0 };
     this.players.set(p.pid, p);
     role.pid = p.pid;
     this.io.send(connId, { v: 1, t: "welcome", pid: p.pid, seat: p.seat, name, color });

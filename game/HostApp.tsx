@@ -1,11 +1,13 @@
 "use client";
 
 import QRCode from "qrcode";
-import { useEffect, useRef, useState } from "react";
-import { randomCode } from "@/shared/constants";
+import { useEffect, useReducer, useRef, useState } from "react";
+import { LAPS, randomCode } from "@/shared/constants";
 import { openRoom, randomToken, send, store } from "@/shared/net";
-import { parseMsg, type LobbyMsg } from "@/shared/protocol";
+import { parseMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
+import { percentile, RaceHost } from "./race";
+import { buildTrack, LAGOON } from "./track";
 
 const HOST_KEY = "tt-host";
 
@@ -15,7 +17,19 @@ export default function HostApp() {
   const [joinUrl, setJoinUrl] = useState("");
   const [qr, setQr] = useState("");
   const [online, setOnline] = useState(false);
+  const [showDebug, setShowDebug] = useState(true);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   const wsRef = useRef<PartySocket | null>(null);
+  const hostRef = useRef<RaceHost | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // One RaceHost for the life of the page; it sends through whichever socket is current.
+  if (!hostRef.current) {
+    hostRef.current = new RaceHost(buildTrack(LAGOON), (m) => send(wsRef.current, m), rerender);
+  }
+  const host = hostRef.current;
+  // Dev-only handle for debugging from the browser console.
+  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") (window as unknown as { __tt: RaceHost }).__tt = host;
 
   // Pick (or resume) a room. A reload keeps the same room thanks to the stored host token.
   useEffect(() => {
@@ -38,16 +52,48 @@ export default function HostApp() {
     ws.addEventListener("message", (e) => {
       const m = parseMsg(e.data);
       if (!m) return;
-      if (m.t === "lobby") setLobby(m as unknown as LobbyMsg);
-      if (m.t === "error" && m.code === "taken") {
-        // Code collision with another live room: start over with a fresh code.
-        store.set(HOST_KEY, { code: randomCode(), seat: randomToken() });
-        ws.close();
-        setCode(store.get<{ code: string }>(HOST_KEY)!.code);
+      switch (m.t) {
+        case "in":
+          host.onInput(String(m.p), m.s as -1 | 0 | 1, Number(m.k));
+          break;
+        case "ping":
+          send(ws, { v: 1, t: "pong", k: Number(m.k), p: String(m.p) });
+          break;
+        case "stat":
+          host.onStat(String(m.p), Number(m.tt));
+          break;
+        case "start":
+          host.start();
+          break;
+        case "lobby":
+          setLobby(m as unknown as LobbyMsg);
+          host.setLobby(m as unknown as LobbyMsg);
+          break;
+        case "error":
+          if (m.code === "taken") {
+            // Code collision with another live room: start over with a fresh code.
+            store.set(HOST_KEY, { code: randomCode(), seat: randomToken() });
+            ws.close();
+            setCode(store.get<{ code: string }>(HOST_KEY)!.code);
+          }
+          break;
       }
     });
     return () => ws.close();
-  }, [code]);
+  }, [code, host]);
+
+  // Phaser is loaded only in the browser, after the page is up.
+  useEffect(() => {
+    let game: { destroy(removeCanvas: boolean): void } | null = null;
+    let cancelled = false;
+    import("./scene").then(({ createGame }) => {
+      if (!cancelled && canvasRef.current) game = createGame(canvasRef.current, host);
+    });
+    return () => {
+      cancelled = true;
+      game?.destroy(true);
+    };
+  }, [host]);
 
   // QR points phones at /play on this machine's Wi-Fi address, not "localhost".
   useEffect(() => {
@@ -55,14 +101,14 @@ export default function HostApp() {
     let cancelled = false;
     (async () => {
       const { hostname, port, protocol } = window.location;
-      let host = hostname;
+      let addr = hostname;
       if (hostname === "localhost" || hostname === "127.0.0.1") {
         try {
           const { ips } = await (await fetch("/api/lan")).json();
-          if (ips[0]) host = ips[0];
+          if (ips[0]) addr = ips[0];
         } catch {}
       }
-      const url = `${protocol}//${host}${port ? ":" + port : ""}/play?room=${code}`;
+      const url = `${protocol}//${addr}${port ? ":" + port : ""}/play?room=${code}`;
       const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 360, color: { dark: "#0b1d2a", light: "#ffffff" } });
       if (!cancelled) {
         setJoinUrl(url);
@@ -74,42 +120,159 @@ export default function HostApp() {
     };
   }, [code]);
 
+  // Live HUD (standings, countdown, debug numbers) refreshes a few times a second, not every frame.
+  useEffect(() => {
+    const id = setInterval(rerender, 200);
+    const onKey = (e: KeyboardEvent) => e.key.toLowerCase() === "d" && setShowDebug((s) => !s);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   const newRoom = () => {
     store.del(HOST_KEY);
     location.reload();
   };
 
+  const byPid = new Map((lobby?.players ?? []).map((p) => [p.pid, p]));
+  const phase = host.phase;
+
   return (
-    <main className="flex min-h-full flex-col items-center justify-center gap-8 p-8">
-      <div className="flex flex-wrap items-center justify-center gap-12">
-        <div className="text-center">
-          <div className="text-xl uppercase tracking-widest opacity-70">Room code</div>
-          <div className="font-mono text-8xl font-black tracking-[0.2em]">{code ?? "····"}</div>
-          <div className="mt-2 text-lg opacity-70">{joinUrl}</div>
-          <div className="mt-2 text-sm">
-            <span className={online ? "text-green-400" : "text-red-400"}>●</span> {online ? "Room server connected" : "Connecting to room server…"}
+    <main className="fixed inset-0 overflow-hidden">
+      <div ref={canvasRef} className="absolute inset-0" />
+
+      {phase === "lobby" && (
+        <Overlay>
+          <div className="flex flex-wrap items-center justify-center gap-12">
+            <div className="text-center">
+              <div className="text-xl uppercase tracking-widest opacity-70">Room code</div>
+              <div className="font-mono text-8xl font-black tracking-[0.2em]">{code ?? "····"}</div>
+              <div className="mt-2 text-lg opacity-70">{joinUrl}</div>
+              <div className="mt-2 text-sm">
+                <span className={online ? "text-green-400" : "text-red-400"}>●</span> {online ? "Room server connected" : "Connecting to room server…"}
+              </div>
+            </div>
+            {qr && <img src={qr} alt="Scan to join" className="h-72 w-72 rounded-2xl bg-white p-2" />}
           </div>
+          <section className="w-full max-w-3xl">
+            <h2 className="mb-3 text-2xl font-bold">Players ({lobby?.players.length ?? 0}/8)</h2>
+            <PlayerGrid players={lobby?.players ?? []} vip={lobby?.vip ?? null} />
+            {lobby && lobby.players.length === 0 && <p className="opacity-70">Scan the QR code with your phone to join.</p>}
+          </section>
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => host.start()}
+              disabled={!lobby || lobby.players.length === 0}
+              className="rounded-2xl px-8 py-4 text-2xl font-black text-black disabled:opacity-30"
+              style={{ background: "var(--racer)" }}
+            >
+              Start race
+            </button>
+            <button onClick={newRoom} className="text-sm underline opacity-50">
+              New room code
+            </button>
+          </div>
+        </Overlay>
+      )}
+
+      {phase === "countdown" && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="text-[14rem] font-black drop-shadow-[0_6px_0_rgba(0,0,0,0.5)]">{Math.max(1, Math.ceil(host.countdownLeft / 1000))}</div>
         </div>
-        {qr && <img src={qr} alt="Scan to join" className="h-72 w-72 rounded-2xl bg-white p-2" />}
-      </div>
+      )}
 
-      <section className="w-full max-w-3xl">
-        <h2 className="mb-3 text-2xl font-bold">Players ({lobby?.players.length ?? 0}/8)</h2>
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {lobby?.players.map((p) => (
-            <li key={p.pid} className="rounded-xl p-3 font-bold text-black" style={{ background: p.color, opacity: p.on ? 1 : 0.4 }}>
-              {p.name}
-              {p.pid === lobby.vip && " ★"}
-              {!p.on && <div className="text-xs font-normal">reconnecting…</div>}
-            </li>
-          ))}
-        </ul>
-        {lobby && lobby.players.length === 0 && <p className="opacity-70">Scan the QR code with your phone to join.</p>}
-      </section>
+      {(phase === "race" || phase === "countdown") && host.race && (
+        <ol className="pointer-events-none absolute left-4 top-4 space-y-1 rounded-xl bg-black/50 p-3 text-lg font-bold">
+          {[...host.race.cars]
+            .sort((a, b) => (a.finishMs ?? Infinity) - (b.finishMs ?? Infinity) || b.dist - a.dist)
+            .map((c, i) => {
+              const p = byPid.get(c.pid);
+              return (
+                <li key={c.pid} className="flex items-center gap-2">
+                  <span className="w-6 opacity-70">{i + 1}</span>
+                  <span className="h-3 w-3 rounded-full" style={{ background: p?.color }} />
+                  <span style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
+                  <span className="ml-auto pl-4 text-sm opacity-70">{c.finishMs !== null ? "🏁" : `Lap ${Math.min(c.lap + 1, LAPS)}/${LAPS}`}</span>
+                </li>
+              );
+            })}
+        </ol>
+      )}
 
-      <button onClick={newRoom} className="text-sm underline opacity-50">
-        New room code
-      </button>
+      {phase === "results" && (
+        <Overlay>
+          <h1 className="text-6xl font-black">Results</h1>
+          <ol className="w-full max-w-xl space-y-2">
+            {host.results.map((r, i) => {
+              const p = byPid.get(r.pid);
+              return (
+                <li key={r.pid} className="flex items-center gap-4 rounded-xl bg-white/10 p-3 text-2xl font-bold">
+                  <span className="w-10 text-3xl">{["🥇", "🥈", "🥉"][i] ?? i + 1}</span>
+                  <span className="h-5 w-5 rounded-full" style={{ background: p?.color }} />
+                  <span>{p?.name ?? "Left the room"}</span>
+                  <span className="ml-auto font-mono text-xl opacity-80">{r.ms !== null ? (r.ms / 1000).toFixed(2) + "s" : "DNF"}</span>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="flex gap-4">
+            <button onClick={() => host.start()} className="rounded-2xl px-8 py-4 text-2xl font-black text-black" style={{ background: "var(--racer)" }}>
+              Race again
+            </button>
+            <button onClick={() => host.backToLobby()} className="rounded-2xl border-2 px-8 py-4 text-2xl font-bold" style={{ borderColor: "var(--racer)" }}>
+              Lobby
+            </button>
+          </div>
+        </Overlay>
+      )}
+
+      {phase !== "lobby" && lobby && !online && (
+        <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">Lost connection to the room server — reconnecting…</div>
+      )}
+
+      {showDebug && <DebugPanel host={host} players={lobby?.players ?? []} />}
     </main>
+  );
+}
+
+function Overlay({ children }: { children: React.ReactNode }) {
+  return <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 overflow-auto bg-[#0b1d2a]/85 p-8">{children}</div>;
+}
+
+function PlayerGrid({ players, vip }: { players: PlayerInfo[]; vip: string | null }) {
+  return (
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {players.map((p) => (
+        <li key={p.pid} className="rounded-xl p-3 font-bold text-black" style={{ background: p.color, opacity: p.on ? 1 : 0.4 }}>
+          {p.name}
+          {p.pid === vip && " ★"}
+          {!p.on && <div className="text-xs font-normal">reconnecting…</div>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Press D to toggle. Shows the numbers the Phase 1 gate needs. */
+function DebugPanel({ host, players }: { host: RaceHost; players: PlayerInfo[] }) {
+  const p50 = percentile(host.stats, 50);
+  const p95 = percentile(host.stats, 95);
+  const fmt = (x: number | null) => (x === null ? "–" : `${Math.round(x)} ms`);
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg bg-black/60 p-3 font-mono text-xs leading-5">
+      <div className="font-bold">touch → TV (target &lt; 120 ms)</div>
+      <div>
+        p50 {fmt(p50)} · p95 {fmt(p95)} · n={host.stats.length}
+      </div>
+      {players.map((p) => (
+        <div key={p.pid}>
+          <span style={{ color: p.color }}>■</span> {p.name}: {fmt(host.lastStat.get(p.pid) ?? null)}
+          {!p.on && " (offline)"}
+        </div>
+      ))}
+      <div className="opacity-60">D to hide</div>
+    </div>
   );
 }

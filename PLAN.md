@@ -22,7 +22,7 @@ Party racing game. One big screen (TV, laptop, or a phone) runs the race. Every 
 
 ## 2. How a match plays
 
-A match = 3 races of ~90 seconds. Full match ≈ 8 minutes.
+A match = 3 races of ~90 seconds. Full match ≈ 8 minutes. **Each race is 2 laps** (decided 2026-11-19); track length is tuned so 2 laps ≈ 90 s.
 
 1. **Lobby.** Host opens `/host`, gets a 4-letter room code + QR. Phones scan, enter name, pick a car color. First player to join (or the host) presses Start.
 2. **Secret roles (phone only, 5 s).** Each phone privately shows *Racer* or *Traitor*. 3–5 players → 1 traitor. 6–8 → 2 traitors (they see each other).
@@ -61,7 +61,7 @@ Hotspot mode: the host app runs a local WebSocket server; phones connect over th
 | Part | Tech |
 |---|---|
 | Web app | Next.js (App Router, TypeScript), Tailwind |
-| Host game (Phase 1–3) | Phaser 4, 2D top-down, Arcade physics |
+| Host game (Phase 1–3) | Phaser 4 for drawing, 2D top-down. Physics is our own small deterministic sim in `game/sim.ts` (not Arcade), so the same code can run in tests and later on the server to re-simulate laps for leaderboards (section 8) |
 | Host game (Phase 4 visual upgrade) | Either pre-rendered 3D car sprites (16 angles) in Phaser, OR Three.js/Babylon.js + Rapier with a tilted camera. Decide by benchmark |
 | Realtime | `partyserver` on Cloudflare Workers + Durable Objects (own Cloudflare account); client `partysocket` |
 | API | Cloudflare Worker (Hono) |
@@ -125,6 +125,22 @@ If no phone has My screen ON, the host sends **no** snapshots.
 {"v":1,"t":"result","caught":["p3"],"scores":{...}}           // room → all
 {"v":1,"t":"view","on":true}                                  // My screen toggle
 ```
+
+Phase 1 also uses these (see `shared/protocol.ts` for the exact types):
+
+```json
+{"v":1,"t":"welcome","pid":"p7","seat":"<token>","name":"Zippy Crab","color":"#4DA3FF"} // room → one phone, after join
+{"v":1,"t":"hosthello","seat":"<token>"}                      // host → room, claims or rejoins the room
+{"v":1,"t":"phase","phase":"countdown","laps":2,"ms":3000}    // host → room → phones (lobby|countdown|race|results)
+{"v":1,"t":"startreq"}                                        // VIP phone → room → host ("start")
+{"v":1,"t":"ping","k":12} / {"v":1,"t":"pong","k":12,"h":1}   // phone ↔ host round trip (h:0 = room answered, host offline)
+{"v":1,"t":"ack","k":31}                                      // host → one phone: input 31 is applied and drawn
+{"v":1,"t":"stat","tt":42}                                    // phone → host: measured touch → TV ms
+{"v":1,"t":"lap","p":"p7","lap":1,"laps":2}                   // host → room → that phone only
+{"v":1,"t":"error","code":"full","msg":"..."}                 // room → one connection
+```
+
+**Touch → TV measurement:** the phone numbers each input (`k`) and remembers when the finger touched. The host acks `k` right after drawing the frame that used it. Phone computes `ack arrival − touch time − RTT/2` and reports it with `stat`. The host debug panel (key **D**) shows p50/p95.
 
 Switch to binary (MessagePack) only if size becomes a measured problem.
 
@@ -205,7 +221,7 @@ Play never waits for the backend. Guest-first.
 ## 8. Security, safety, privacy
 
 - Roles, trap owners and votes are only on the room server, sent one-to-one, never broadcast.
-- Room codes: 4 letters, no confusing letters (O/0, I/1), expire when the room empties, rate-limited creation and joining.
+- Room codes: 4 letters, no confusing letters (O/0, I/1), expire when the room empties, rate-limited creation and joining. (Phase 1: codes and expiry done; rate limiting is added before the public deploy in Phase 3.)
 - Leaderboards (later): accept a lap only if the server re-simulates the submitted inputs and gets the same time.
 - Names: pick from a word list by default, or pass a profanity filter. **No free text chat.**
 - Shared tracks (later): filter names, Report button, block author, contact email in app. (Apple guideline 1.2.)
@@ -220,7 +236,7 @@ Do not start a phase until the previous gate passes.
 
 | Phase | Build | Gate |
 |---|---|---|
-| **0. Paper test** | Printed track, toy cars, folded trap cards, secret role cards | Groups ask for another round |
+| **0. Paper test** | Printed track, toy cars, folded trap cards, secret role cards | Groups ask for another round. **Skipped by decision on 2026-11-19** — validate fun in Phase 2 playtests instead |
 | **1. Core loop (web, 2D)** | Next.js `/host` + `/play`, PartyServer room, room code + QR, join, 1 track, left/right controls, laps, finish screen, reconnects, latency dot | Touch→TV < 120 ms on home Wi-Fi with 4 real phones (2 iPhone, 2 Android); 4 players race without disconnects |
 | **2. Traitors** | Roles, trap draft (3 cards), hidden traps, hit banner, Glitch, voting, scoring, 3-race match, bots | 7 of 10 test groups play 3+ matches in a row |
 | **3. Polish + launch web** | 4 tracks, 6 cards, sounds, My screen view (state-drawn), ads after 20 matches, privacy page, deploy | 30% of test groups play again within 7 days |

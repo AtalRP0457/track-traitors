@@ -31,7 +31,8 @@ export type PhoneToRoom = JoinMsg | InputMsg | PingMsg | StartReqMsg | StatMsg;
 // ---------- host → room ----------
 
 export interface HostHelloMsg { v: 1; t: "hosthello"; seat: string }
-export interface PhaseMsg { v: 1; t: "phase"; phase: Phase; laps: number; endsAt?: number }
+/** ms = time left in this phase (countdown), measured from when the message arrives. */
+export interface PhaseMsg { v: 1; t: "phase"; phase: Phase; laps: number; ms?: number }
 /** Reply to a forwarded ping. */
 export interface PongMsg { v: 1; t: "pong"; k: number; p?: string; h?: 0 | 1 }
 /** Host applied input k from player p and drew the frame. */

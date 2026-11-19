@@ -5,6 +5,7 @@ import { networkInterfaces } from "node:os";
 export const dynamic = "force-dynamic";
 
 export function GET() {
+  if (process.env.NODE_ENV === "production") return new Response("Not found", { status: 404 });
   const ips = Object.values(networkInterfaces())
     .flat()
     .filter((i) => i && i.family === "IPv4" && !i.internal)

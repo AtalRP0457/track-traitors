@@ -43,6 +43,27 @@ A match = 3 races of ~90 seconds. Full match ≈ 8 minutes. **Each race is 2 lap
 
 ---
 
+## 2b. Tracks (launch set: 6, plus 2 later)
+
+All tracks are original island/beach locations. Target lap time ~30 s, so a 3-lap race is ~90 s. Every track also has a Mirror version (flipped left↔right), which doubles the track list for free.
+
+| # | Track | Shape | Difficulty | Special feature | Best trap spots | Arrives in |
+|---|---|---|---|---|---|---|
+| 1 | Sunny Cove | Wide rounded loop along the sand | Easy | None. Tutorial and first-race track | Exit of the long final bend | Phase 1 |
+| 2 | Coconut Harbor | Loop over wooden docks and two narrow bridges | Easy–Medium | Narrow bridges: one car wide, so traps there are deadly | Bridge entries | Phase 2 |
+| 3 | Lagoon Figure-8 | Figure-8 with a crossing in the middle | Medium | Cars can collide at the crossing; shallow water patch slows you | Just before the crossing | Phase 2 |
+| 4 | Jungle Switchback | Tight hairpins up and down a hill | Medium | Risky shortcut through a hollow log (one car fits) | Hairpin apexes, log exit | Phase 3 |
+| 5 | Volcano Rim | Loop around a crater | Hard | Lava cracks open on a fixed rhythm; ash patches have low grip | Next to lava cracks | Phase 3 |
+| 6 | Boardwalk Night Market | City-style loop with 90° corners, at night | Medium–Hard | Crab crowds cross the road at set moments; limited view ahead | Blind corners | Phase 3 |
+| 7 | Lighthouse Cliffs | Cliffside road with open edges | Hard | Wind gusts push cars sideways (shown by flags) | Cliff-edge straights | Phase 7 |
+| 8 | Sandbar Sprint | Short, straight-heavy loop | Easy | Very fast; good for 8 players | Middle of straights | Phase 7 |
+
+### Track file format (public/assets/tracks/<id>.json)
+Fields: id, name, version, centerline (closed loop of [x,y], ~40–120 points, smoothed in game), width, checkpoints (indexes into centerline; laps count only in order), startGrid (8 × [x,y,angle]), surfaces (sand/water polygons), hazards (bridge, lava with period, etc.), trapZones ([fromIndex,toIndex] where traps may be placed), racingLine (for bots), background (one pre-made image, also used for the phone view), minimap image.
+Rules: no traps within 2 seconds of the start line; every track must be finishable by bots; every track has a minimap image.
+
+---
+
 ## 3. Architecture
 
 ```
@@ -194,6 +215,33 @@ Each phone stores `pid` + random `seat` token (localStorage). If a phone drops, 
 
 ---
 
+## 5b. Host screen layout and camera (Phase 2)
+
+Fill the whole window
+- The game canvas fills the full browser window at any size and aspect ratio (Phaser scale mode RESIZE, redraw on resize). No letterbox bars, no fixed-size box.
+- Test at 1280×720, 1440×900, 1920×1080 and 2560×1080.
+- Overlays (positions, banners, room code) stay pinned to screen edges and scale with window height so they're readable from a sofa.
+- Fullscreen button on the host (and the F key); hide the mouse cursor after 3 s without movement.
+
+Broadcast camera (instead of showing the whole map)
+- Follows the PACK: centers on the average position of all cars and zooms so all cars stay in view with a margin.
+- Zoom limits: never closer than about 3 car-lengths across the screen's short side, never further than the whole track. All changes smoothed (lerp), never jerky.
+- Leader bias: center pulled slightly ahead of the leader so players see what's coming.
+- If one car falls very far behind, keep the leading group in frame and show the straggler in a small corner window instead of zooming all the way out.
+- Trap-hit cut: YES. When a trap triggers, zoom toward the crash for ~1.5 s with 0.5x slow motion on the host display only (physics keeps running normally), then return to the pack. Max one cut every 5 s.
+- Race start: brief wide shot of the whole track, then zoom to the starting grid for the countdown.
+- Finish: zoom on the finish line for a photo finish.
+- A minimap in a corner always shows the full track and all cars.
+
+Rest of the screen
+- Right edge: live positions tower. Top center: event banners (trap hits, laps). Bottom left: room code. Bottom right: "traps still hidden" counter. A corner: minimap. Phone reactions float up from the bottom.
+
+Performance: camera math runs once per frame on the host only; no extra network messages; must hold 60 fps.
+
+Later (Phase 4): tilted 2.5D/3D host camera, and a pseudo-3D "behind your car" view on phones made by tilting the track image into perspective (Mode 7 style).
+
+---
+
 ## 6. Ads rule (exact)
 
 - Count **completed matches** per host device (localStorage in web, Preferences in app).
@@ -238,9 +286,9 @@ Do not start a phase until the previous gate passes.
 |---|---|---|
 | **0. Paper test** | Printed track, toy cars, folded trap cards, secret role cards | Groups ask for another round. **Skipped by decision on 2026-11-19** — validate fun in Phase 2 playtests instead |
 | **1. Core loop (web, 2D)** | Next.js `/host` + `/play`, PartyServer room, room code + QR, join, 1 track, left/right controls, laps, finish screen, reconnects, latency dot | Touch→TV < 120 ms on home Wi-Fi with 4 real phones (2 iPhone, 2 Android); 4 players race without disconnects |
-| **2. Traitors** | Roles, trap draft (3 cards), hidden traps, hit banner, Glitch, voting, scoring, 3-race match, bots | 7 of 10 test groups play 3+ matches in a row |
-| **3. Polish + launch web** | 4 tracks, 6 cards, sounds, My screen view (state-drawn), ads after 20 matches, privacy page, deploy | 30% of test groups play again within 7 days |
-| **4. Look upgrade** | Beach/island art, tilted 2.5D camera (benchmark sprites vs Three.js first), drift button, juicier effects | Still 60 fps on a mid-range laptop; phones < 5% battery per 30 min |
+| **2. Traitors** | Full-window host screen + broadcast camera (section 5b), Coconut Harbor + Lagoon Figure-8, roles, trap draft (3 cards), hidden traps, hit banner, Glitch, voting, scoring, 3-race match, bots | 7 of 10 test groups play 3+ matches in a row |
+| **3. Polish + launch web** | All 6 launch tracks + Mirror versions, 6 cards, sounds, My screen view (state-drawn), ads after 20 matches, privacy page, deploy | 30% of test groups play again within 7 days |
+| **4. Look upgrade** | Beach/island art, tilted 2.5D camera (benchmark sprites vs Three.js first), drift button, juicier effects, Mode 7 behind-the-car view on phones; speed lines, shake, sparks, engine sound on phone | Still 60 fps on a mid-range laptop; phones < 5% battery per 30 min |
 | **5. Android app** | Capacitor, haptics, landscape lock, hotspot mode (2-phone spike first), AdMob, Play closed test (12 testers × 14 days) | Approved on Google Play |
 | **6. iPhone + Discord** | iOS build (Codemagic), local-network permission text, Game Center, Discord Activity | Approved on App Store |
 | **7. Community** | Track editor, weekly track, Daily Track, leaderboards with anti-cheat, moderation | Weekly track played by 20%+ of active players |
@@ -270,3 +318,25 @@ Do not start a phase until the previous gate passes.
 - Apple "just a website" rejection → native features (haptics, offline, Game Center).
 - Scope creep → one game, one phase at a time.
 - Original art only → no copying other games' cars, characters, names or sounds. Keep a list of asset licenses (CC0 preferred, e.g. Kenney).
+
+---
+
+## 12. Extras to build in from the start
+
+| Extra | What | Phase |
+|---|---|---|
+| Dev tools | /dev page that opens 1–7 fake phone controllers (bots sending inputs) so one person can test an 8-player race; latency/packet-loss simulator; overlay with fps, ping per player, messages per second | 1 (add now if missing) |
+| Track loader | Tracks load only from the JSON format, never hard-coded | 1 (add now if missing) |
+| Strings file | All on-screen text in strings/en.json | 1 |
+| Analytics events | Log room created, player joined, match started/finished, vote result, disconnect, latency, fps | 1 |
+| Host settings | Races (1/3/5), traitors (auto/1/2), trap cards per player (1/2), items on/off, bots on/off | 2 |
+| Reactions | 6 fixed emoji-style buttons on phones (no text), floating on the big screen | 2 |
+| Catch-up | Last place gets slightly higher top speed | 2 |
+| First-race tutorial | 30-second guided first race on Sunny Cove | 3 |
+| Accessibility | Pattern/number on each car color; one-thumb option; large text; blue/orange palette | 3 |
+| Photo finish + highlight | Slow-motion replay from recorded positions (not video) | 3 |
+| Name word list | Safe fun default names, editable through a filter | 3 |
+| Spectators | Players 9+ vote on one bonus hazard per race | 7 |
+| Weather/time variants | Rain or sunset versions of tracks | 7 |
+
+Not now: track editor, leaderboards, accounts, Discord, second game.

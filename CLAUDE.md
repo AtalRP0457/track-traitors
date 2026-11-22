@@ -26,6 +26,7 @@ Read PLAN.md before any task. It is the source of truth for game rules, architec
 - Dev room server: `npm run dev:party` (wrangler dev on port 1999, all interfaces)
 - Both at once: `npm run dev:all`
 - Tests: `npm test` · Typecheck: `npm run typecheck`
+- Rebuild track images after editing a track JSON: `npm run tracks`
 
 ## Testing checklist for every controller change
 - Real iPhone (Safari) and real Android (Chrome)

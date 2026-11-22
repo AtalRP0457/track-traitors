@@ -26,6 +26,8 @@ export interface Car {
   /** Unwrapped distance driven along the track. Starts negative (behind the start line). */
   dist: number;
   seg: number;
+  /** Checkpoints passed in order since the start (checkpoint 0 of lap 0 is the start line). */
+  cp: number;
   lap: number;
   finishMs: number | null;
 }
@@ -38,16 +40,21 @@ export interface RaceState {
 }
 
 export function createRace(track: Track, pids: string[], laps: number): RaceState {
+  const L = track.length;
   const cars = pids.map((pid, i) => {
-    const back = 50 + Math.floor(i / 2) * 46;
-    const side = i % 2 === 0 ? -28 : 28;
-    const c = pointAt(track, -back);
-    const nx = -Math.sin(c.a), ny = Math.cos(c.a);
-    const x = c.x + nx * side, y = c.y + ny * side;
+    const [x, y, a] = track.def.startGrid[i % track.def.startGrid.length];
     const p = project(track, x, y);
-    return { pid, x, y, a: c.a, v: 0, steer: 0, dist: -back, seg: p.i, lap: 0, finishMs: null } as Car;
+    // Grid slots sit behind the start line, so their distance is negative.
+    const dist = p.s > L / 2 ? p.s - L : p.s;
+    return { pid, x, y, a, v: 0, steer: 0, dist, seg: p.i, cp: 0, lap: 0, finishMs: null } as Car;
   });
   return { track, laps, cars, tick: 0 };
+}
+
+/** Unwrapped distance of the k-th checkpoint in driving order. */
+function cpDist(t: Track, k: number): number {
+  const n = t.cps.length;
+  return Math.floor(k / n) * t.length + t.cps[k % n];
 }
 
 export function raceMs(r: RaceState): number {
@@ -93,8 +100,11 @@ export function step(r: RaceState): string[] {
     if (Math.abs(d) <= TUNING.maxStepProgress) c.dist += d;
     c.seg = np.i;
 
+    // Checkpoints only count in order; a lap is done when checkpoint 0 comes round again.
+    while (c.dist >= cpDist(track, c.cp)) c.cp++;
+
     if (!done) {
-      const lap = Math.floor(c.dist / L);
+      const lap = c.cp > 0 ? Math.floor((c.cp - 1) / track.cps.length) : 0;
       if (lap > c.lap) {
         c.lap = lap;
         lapped.push(c.pid);

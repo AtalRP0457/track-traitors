@@ -1,7 +1,7 @@
 // Room logic, kept free of Cloudflare APIs so it can be unit tested.
 // The room is a relay + secret keeper. It never decides race results; the host does.
 
-import { CAR_COLORS, LAPS, MAX_PLAYERS, SEAT_HOLD_MS } from "../shared/constants";
+import { CAR_COLORS, DEFAULT_TRACK, LAPS, MAX_PLAYERS, SEAT_HOLD_MS } from "../shared/constants";
 import { isListName, randomName } from "../shared/names";
 import { parseMsg, type AnyMsg, type LobbyMsg, type Phase, type PlayerInfo } from "../shared/protocol";
 
@@ -144,7 +144,7 @@ export class RoomCore {
         break;
       case "startreq":
         if (hostConn != null && p.pid === this.vip() && (this.phase === "lobby" || this.phase === "results")) {
-          this.io.send(hostConn, { v: 1, t: "start", mode: "classic", track: "lagoon" });
+          this.io.send(hostConn, { v: 1, t: "start", mode: "classic", track: DEFAULT_TRACK });
         }
         break;
       case "stat": {

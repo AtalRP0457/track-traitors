@@ -1,43 +1,29 @@
 // Track geometry: a closed centerline + road width. Pure math, no Phaser, so it can run
 // anywhere (host, tests, later the server for lap re-simulation).
 
-export interface TrackDef {
-  id: string;
-  name: string;
-  world: { w: number; h: number };
-  width: number;
-  /** Control points of the closed loop, in driving order. The start line is at the first point. */
-  points: [number, number][];
-}
+import type { TrackFile, Vec } from "../shared/track-format";
 
-/** "Lagoon Loop": original layout for Phase 1. */
-export const LAGOON: TrackDef = {
-  id: "lagoon",
-  name: "Lagoon Loop",
-  world: { w: 1600, h: 900 },
-  width: 120,
-  points: [
-    [260, 470], [250, 260], [420, 140], [640, 170], [760, 300], [900, 200],
-    [1120, 130], [1360, 190], [1450, 400], [1380, 640], [1180, 760], [960, 730],
-    [820, 580], [660, 640], [520, 770], [330, 730],
-  ],
-};
-
-export interface Track {
-  def: TrackDef;
-  /** Dense samples along the centerline. */
+export interface Loop {
+  /** Dense samples along a smoothed closed loop. */
   xs: Float64Array;
   ys: Float64Array;
-  /** Distance along the centerline at each sample. */
+  /** Distance along the loop at each sample. */
   ds: Float64Array;
   length: number;
 }
 
-const SAMPLES_PER_SEGMENT = 24;
+export interface Track extends Loop {
+  def: TrackFile;
+  /** Distance along the centerline of each checkpoint (first is 0, the start line). */
+  cps: number[];
+  /** Smoothed racing line for bots. */
+  line: Loop;
+}
 
-/** Smooth the control points with a closed Catmull-Rom spline and sample it densely. */
-export function buildTrack(def: TrackDef): Track {
-  const p = def.points;
+export const SAMPLES_PER_SEGMENT = 8;
+
+/** Smooth closed control points with a Catmull-Rom spline and sample densely. */
+export function smoothLoop(p: Vec[]): Loop {
   const n = p.length;
   const total = n * SAMPLES_PER_SEGMENT;
   const xs = new Float64Array(total);
@@ -63,7 +49,23 @@ export function buildTrack(def: TrackDef): Track {
     const k2 = (k + 1) % total;
     len += Math.hypot(xs[k2] - xs[k], ys[k2] - ys[k]);
   }
-  return { def, xs, ys, ds, length: len };
+  return { xs, ys, ds, length: len };
+}
+
+/** Build the runtime track from a (validated) track file. */
+export function buildTrack(def: TrackFile): Track {
+  const loop = smoothLoop(def.centerline);
+  return {
+    def,
+    ...loop,
+    cps: def.checkpoints.map((i) => loop.ds[i * SAMPLES_PER_SEGMENT]),
+    line: smoothLoop(def.racingLine),
+  };
+}
+
+/** Distance along the centerline of a centerline point index. */
+export function indexDist(t: Track, i: number): number {
+  return t.ds[i * SAMPLES_PER_SEGMENT];
 }
 
 export interface Projection {
@@ -79,7 +81,7 @@ export interface Projection {
  * Closest point on the centerline. `hint` is the last known segment; searching a window
  * around it keeps this cheap and stops the car "jumping" to a different part of the loop.
  */
-export function project(t: Track, x: number, y: number, hint = -1): Projection {
+export function project(t: Loop, x: number, y: number, hint = -1): Projection {
   const n = t.xs.length;
   const window = hint < 0 ? n : 40;
   const from = hint < 0 ? 0 : hint - window;
@@ -99,7 +101,7 @@ export function project(t: Track, x: number, y: number, hint = -1): Projection {
 }
 
 /** Point and heading on the centerline at distance s (wraps around). */
-export function pointAt(t: Track, s: number): { x: number; y: number; a: number } {
+export function pointAt(t: Loop, s: number): { x: number; y: number; a: number } {
   const L = t.length;
   s = ((s % L) + L) % L;
   let lo = 0, hi = t.ds.length - 1;

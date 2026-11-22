@@ -1,17 +1,13 @@
-// Phaser scene for the big screen. Draws the track once into a texture, then each frame
-// steps the race (fixed 60 Hz inside RaceHost) and draws interpolated cars.
+// Phaser scene for the big screen. Shows the track's pre-made background image, then each
+// frame steps the race (fixed 60 Hz inside RaceHost) and draws interpolated cars.
 
 import * as Phaser from "phaser";
-import { pointAt } from "./track";
 import type { RaceHost } from "./race";
 
-const ROAD = 0x3a3f4b;
-const CURB = 0xf3e2b3; // sand
-const GRASS = 0x2fae6a;
 const WATER = 0x1f8fcf;
 
 export function createGame(parent: HTMLElement, host: RaceHost): Phaser.Game {
-  const { w, h } = host.track.def.world;
+  const { w, h } = host.track!.def.world;
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -31,8 +27,13 @@ class RaceScene extends Phaser.Scene {
     super("race");
   }
 
+  preload() {
+    const { def } = this.host.track!;
+    this.load.svg("track", def.background, { width: def.world.w, height: def.world.h });
+  }
+
   create() {
-    this.drawTrack();
+    this.add.image(0, 0, "track").setOrigin(0).setDepth(0);
     this.makeCarTexture();
     this.game.events.on(Phaser.Core.Events.POST_RENDER, () => this.host.afterRender());
   }
@@ -77,47 +78,6 @@ class RaceScene extends Phaser.Scene {
       if (car.label.text !== info.name) car.label.setText(info.name);
     }
     return car;
-  }
-
-  /** Bake the track (island, sand curbs, road, start line) into one texture. No per-frame cost. */
-  private drawTrack() {
-    const t = this.host.track;
-    const { w, h } = t.def.world;
-    const g = this.add.graphics();
-    const n = t.xs.length;
-
-    const ribbon = (width: number, color: number) => {
-      g.fillStyle(color, 1);
-      for (let i = 0; i < n; i++) g.fillCircle(t.xs[i], t.ys[i], width / 2);
-    };
-
-    g.fillStyle(GRASS, 1);
-    g.fillRoundedRect(60, 40, w - 120, h - 80, 120);
-    ribbon(t.def.width + 22, CURB);
-    ribbon(t.def.width, ROAD);
-
-    // Dashed center line.
-    g.fillStyle(0xffffff, 0.35);
-    for (let i = 0; i < n; i += 6) g.fillCircle(t.xs[i], t.ys[i], 2.5);
-
-    // Checkered start line across the road at s = 0.
-    const s = pointAt(t, 0);
-    const nx = -Math.sin(s.a), ny = Math.cos(s.a);
-    const tx = Math.cos(s.a), ty = Math.sin(s.a);
-    const sq = 10;
-    const cells = Math.floor(t.def.width / sq);
-    for (let i = 0; i < cells; i++) {
-      for (let j = 0; j < 2; j++) {
-        g.fillStyle((i + j) % 2 ? 0x111111 : 0xffffff, 1);
-        const off = (i - cells / 2 + 0.5) * sq;
-        const along = (j - 0.5) * sq;
-        g.fillRect(s.x + nx * off + tx * along - sq / 2, s.y + ny * off + ty * along - sq / 2, sq, sq);
-      }
-    }
-
-    g.generateTexture("track", w, h);
-    g.destroy();
-    this.add.image(0, 0, "track").setOrigin(0).setDepth(0);
   }
 
   /** White car shape so each player's color can be applied with a tint. Faces +x. */

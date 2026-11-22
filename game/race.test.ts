@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AnyMsg, LobbyMsg } from "../shared/protocol";
 import { percentile, RaceHost } from "./race";
-import { buildTrack, LAGOON } from "./track";
+import { loadTestTrack } from "./test-tracks";
 
 function setup() {
   const out: AnyMsg[] = [];
-  const host = new RaceHost(buildTrack(LAGOON), (m) => out.push(m), () => {});
+  const host = new RaceHost(loadTestTrack(), (m) => out.push(m), () => {});
   const lobby: LobbyMsg = {
     v: 1, t: "lobby", code: "ABCD", vip: "a", phase: "lobby", host: true,
     players: [

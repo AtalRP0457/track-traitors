@@ -8,6 +8,8 @@ export const HEARTBEAT_MS = 1_000;
 export const PING_MS = 2_000;
 export const COUNTDOWN_MS = 3_000;
 export const PARTY_NAME = "room";
+/** Track used until track choice arrives (Phase 2). Loaded from public/assets/tracks/<id>.json. */
+export const DEFAULT_TRACK = "sunny-cove";
 
 /** Room code letters: no O or I so codes can't be confused with 0 or 1. */
 export const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ";

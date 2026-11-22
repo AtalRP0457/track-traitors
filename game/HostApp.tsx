@@ -2,12 +2,13 @@
 
 import QRCode from "qrcode";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { LAPS, randomCode } from "@/shared/constants";
+import { DEFAULT_TRACK, LAPS, randomCode } from "@/shared/constants";
 import { openRoom, randomToken, send, store } from "@/shared/net";
 import { parseMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
 import { percentile, RaceHost } from "./race";
-import { buildTrack, LAGOON } from "./track";
+import { parseTrack, trackUrl } from "@/shared/track-format";
+import { buildTrack } from "./track";
 
 const HOST_KEY = "tt-host";
 
@@ -18,6 +19,7 @@ export default function HostApp() {
   const [qr, setQr] = useState("");
   const [online, setOnline] = useState(false);
   const [showDebug, setShowDebug] = useState(true);
+  const [trackError, setTrackError] = useState("");
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const wsRef = useRef<PartySocket | null>(null);
   const hostRef = useRef<RaceHost | null>(null);
@@ -25,7 +27,7 @@ export default function HostApp() {
 
   // One RaceHost for the life of the page; it sends through whichever socket is current.
   if (!hostRef.current) {
-    hostRef.current = new RaceHost(buildTrack(LAGOON), (m) => send(wsRef.current, m), rerender);
+    hostRef.current = new RaceHost(null, (m) => send(wsRef.current, m), rerender);
   }
   const host = hostRef.current;
   // Dev-only handle for debugging from the browser console.
@@ -82,13 +84,23 @@ export default function HostApp() {
     return () => ws.close();
   }, [code, host]);
 
-  // Phaser is loaded only in the browser, after the page is up.
+  // Load the track file, then start Phaser (browser only, after the page is up).
   useEffect(() => {
     let game: { destroy(removeCanvas: boolean): void } | null = null;
     let cancelled = false;
-    import("./scene").then(({ createGame }) => {
+    (async () => {
+      try {
+        const res = await fetch(trackUrl(DEFAULT_TRACK));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        host.track = buildTrack(parseTrack(await res.json()));
+      } catch (e) {
+        setTrackError(`Could not load track "${DEFAULT_TRACK}": ${(e as Error).message}`);
+        return;
+      }
+      const { createGame } = await import("./scene");
       if (!cancelled && canvasRef.current) game = createGame(canvasRef.current, host);
-    });
+      rerender();
+    })();
     return () => {
       cancelled = true;
       game?.destroy(true);
@@ -164,7 +176,7 @@ export default function HostApp() {
           <div className="flex items-center gap-6">
             <button
               onClick={() => host.start()}
-              disabled={!lobby || lobby.players.length === 0}
+              disabled={!lobby || lobby.players.length === 0 || !host.track}
               className="rounded-2xl px-8 py-4 text-2xl font-black text-black disabled:opacity-30"
               style={{ background: "var(--racer)" }}
             >
@@ -231,6 +243,8 @@ export default function HostApp() {
       {phase !== "lobby" && lobby && !online && (
         <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">Lost connection to the room server — reconnecting…</div>
       )}
+
+      {trackError && <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{trackError}</div>}
 
       {showDebug && <DebugPanel host={host} players={lobby?.players ?? []} />}
     </main>

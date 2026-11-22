@@ -59,7 +59,8 @@ All tracks are original island/beach locations. Target lap time ~30 s, so a 3-la
 | 8 | Sandbar Sprint | Short, straight-heavy loop | Easy | Very fast; good for 8 players | Middle of straights | Phase 7 |
 
 ### Track file format (public/assets/tracks/<id>.json)
-Fields: id, name, version, centerline (closed loop of [x,y], ~40–120 points, smoothed in game), width, checkpoints (indexes into centerline; laps count only in order), startGrid (8 × [x,y,angle]), surfaces (sand/water polygons), hazards (bridge, lava with period, etc.), trapZones ([fromIndex,toIndex] where traps may be placed), racingLine (for bots), background (one pre-made image, also used for the phone view), minimap image.
+Fields: id, name, version, world ({w,h} in px, the area the background covers), centerline (closed loop of [x,y], ~40–120 points, smoothed in game), width, checkpoints (indexes into centerline; laps count only in order), startGrid (8 × [x,y,angle]), surfaces (sand/water polygons), hazards (bridge, lava with period, etc.), trapZones ([fromIndex,toIndex] where traps may be placed), racingLine (for bots), background (one pre-made image, also used for the phone view), minimap image.
+Images are generated from the JSON with `npm run tracks` (SVG for now; hand-drawn art can replace them in Phase 4). Format types + validator: `shared/track-format.ts`. Tests check every file in the folder against the rules below.
 Rules: no traps within 2 seconds of the start line; every track must be finishable by bots; every track has a minimap image.
 
 ---
@@ -100,6 +101,7 @@ track-traitors/
 ├─ shared/              protocol types, constants, track format (used by host, phone, server)
 ├─ controller/          phone UI: buttons, role card, trap draft, vote, my-screen view
 ├─ party/               PartyServer room (Durable Object)
+├─ scripts/             build tools (track images)
 ├─ api/                 API Worker (later phases)
 ├─ public/assets/       sprites, tracks (JSON), sounds
 ├─ PLAN.md  CLAUDE.md

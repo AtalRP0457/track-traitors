@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createRace, standings, step, type Car, type RaceState } from "./sim";
-import { buildTrack, LAGOON, pointAt } from "./track";
+import { pointAt } from "./track";
+import { loadTestTrack } from "./test-tracks";
 
-const track = buildTrack(LAGOON);
+const track = loadTestTrack();
 
 /** Simple test driver: steer toward a point a bit ahead on the centerline. */
 function drive(r: RaceState, c: Car, lookahead = 70) {

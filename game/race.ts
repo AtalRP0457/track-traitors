@@ -34,7 +34,7 @@ export class RaceHost {
   lastStat = new Map<string, number>();
 
   constructor(
-    readonly track: Track,
+    public track: Track | null,
     private send: (m: AnyMsg) => void,
     private onChange: () => void,
   ) {}
@@ -65,7 +65,7 @@ export class RaceHost {
 
   start() {
     if (this.phase !== "lobby" && this.phase !== "results") return;
-    if (this.players.length === 0) return;
+    if (this.players.length === 0 || !this.track) return;
     this.race = createRace(this.track, this.players.map((p) => p.pid), LAPS);
     this.prev.clear();
     this.applied.clear();

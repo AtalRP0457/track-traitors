@@ -301,6 +301,34 @@ Do not start a phase until the previous gate passes.
 | **6. iPhone + Discord** | iOS build (Codemagic), local-network permission text, Game Center, Discord Activity | Approved on App Store |
 | **7. Community** | Track editor, weekly track, Daily Track, leaderboards with anti-cheat, moderation | Weekly track played by 20%+ of active players |
 
+### Phase 2 build steps (status 2026-11-21)
+
+Each step = one commit, testable alone with the /dev fake phones (they learn to place cards and vote along the way).
+
+| Step | What | Main files | Status |
+|---|---|---|---|
+| 5b | Full-window host screen + broadcast camera | `game/camera.ts`, `game/hud.ts`, `game/scene.ts` | **Done** (`8b3dc49`) |
+| A | 3-race match, score board, podium; host settings (races 1/3/5, traitors auto/1/2, cards per player 1/2, bots on/off) | `game/race.ts` → split out `game/match.ts`, `party/core.ts`, HostApp | Next |
+| B | Secret roles: room assigns, each phone gets only its own (traitors see each other); 5 s role card | `party/core.ts`, `shared/protocol.ts`, PhoneApp | |
+| C | Trap draft (20 s, 3 cards, tap the minimap → snaps into a trap zone); room keeps owners, host gets positions only (`traps`); host detects triggers, applies the effect, shows the hit banner + trap-cut camera, sends `hit` | new `game/traps.ts`, `controller/Draft.tsx`, core, sim | |
+| D | Glitch: traitor reverses one rival's steering for 2 s, once per race; static flash on the TV, never who | core, sim, `controller/Controls.tsx` | |
+| E | Vote after races 2 and 3 (20 s) with clues from the last race; scoring | core, `controller/Vote.tsx`, HostApp | |
+| F | Bots fill empty seats; fake phones place cards and vote | `game/bot.ts`, `controller/fakePhone.ts` | |
+| G | Coconut Harbor (narrow one-car bridges) + Lagoon Figure-8 (crossing, shallow water) | track JSONs, sim surfaces/hazards | |
+| H | Reactions (6 fixed emoji buttons → float up on the TV) + catch-up (last place gets slightly higher top speed) | PhoneApp, HostApp, sim | |
+
+### Phase 2 open decisions (PROPOSED — not yet decided; confirm before step A)
+
+| # | Question | Proposal |
+|---|---|---|
+| 1 | Can racers draw harmful cards? | Yes. Everyone draws 3 random cards from all 6, so a harmful trap proves nothing and racers can use traps to beat rivals |
+| 2 | Scoring numbers | Race places 10/8/6/5/4/3/2/1. Traitor: +3 per crash their trap causes (on someone else). Traitor surviving a vote: +5. Caught traitor: −5. Wrongly accused racer: +2 |
+| 3 | Vote rules | Majority of votes catches a player; tie = nobody caught; skipping is allowed. A caught traitor is revealed, keeps racing, but loses Glitch |
+| 4 | Bots in Traitors mode | Bots fill seats up to 3 players; bots are always racers and don't vote |
+| 5 | Draft timing | A new trap draft before every race (not once per match) |
+
+Also still open: the Phase 1 gate (4 real phones, touch→TV < 120 ms) has not been measured on real devices yet; Phase 2 work started anyway by decision on 2026-11-21.
+
 ---
 
 ## 10. Numbers to track from day one

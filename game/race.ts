@@ -1,6 +1,7 @@
 // Host-side game flow: lobby → countdown → race → results.
 // Owns the simulation, applies the latest phone inputs each tick, and tells the room what happened.
 
+import type { AnalyticsEvent } from "../shared/analytics";
 import { COUNTDOWN_MS, LAPS } from "../shared/constants";
 import type { AnyMsg, LobbyMsg, Phase, PlayerInfo } from "../shared/protocol";
 import { createRace, DT, standings, step, type RaceState } from "./sim";
@@ -32,16 +33,31 @@ export class RaceHost {
   /** touch → TV samples reported by phones (ms). */
   stats: number[] = [];
   lastStat = new Map<string, number>();
+  /** Host frames per second, measured over the last second. */
+  fps = 0;
+  private fpsFrames = 0;
+  private fpsMs = 0;
+  /** Per-match numbers for analytics. */
+  private match = { stats: [] as number[], fps: [] as number[], disconnects: 0 };
 
   constructor(
     public track: Track | null,
     private send: (m: AnyMsg) => void,
     private onChange: () => void,
+    private log: (e: AnalyticsEvent) => void = () => {},
   ) {}
 
   // ---------- messages from the room ----------
 
   setLobby(m: LobbyMsg) {
+    const before = new Map(this.players.map((p) => [p.pid, p.on]));
+    for (const p of m.players) {
+      if (!before.has(p.pid)) this.log({ e: "player_joined", pid: p.pid, players: m.players.length });
+      else if (before.get(p.pid) && !p.on) {
+        this.log({ e: "disconnect", who: "phone", pid: p.pid, phase: this.phase });
+        if (this.phase === "countdown" || this.phase === "race") this.match.disconnects++;
+      }
+    }
     this.players = m.players;
     for (const p of m.players) if (!p.on) this.inputs.set(p.pid, { s: 0, k: this.inputs.get(p.pid)?.k ?? 0 }); // dropped phone: drive straight
     if (this.race) {
@@ -60,6 +76,7 @@ export class RaceHost {
   onStat(p: string, tt: number) {
     this.stats.push(tt);
     if (this.stats.length > STAT_WINDOW) this.stats.shift();
+    if (this.phase === "race") this.match.stats.push(tt);
     this.lastStat.set(p, tt);
   }
 
@@ -74,6 +91,8 @@ export class RaceHost {
     this.firstFinishTick = null;
     this.results = [];
     this.countdownLeft = COUNTDOWN_MS;
+    this.match = { stats: [], fps: [], disconnects: 0 };
+    this.log({ e: "match_started", track: this.track.def.id, players: this.race.cars.length });
     this.setPhase("countdown");
   }
 
@@ -86,6 +105,7 @@ export class RaceHost {
 
   /** Called every rendered frame with the frame time in ms. Runs fixed 60 Hz physics steps. */
   update(deltaMs: number) {
+    this.countFps(deltaMs);
     if (this.phase === "countdown") {
       this.countdownLeft -= deltaMs;
       if (this.countdownLeft <= 0) this.setPhase("race");
@@ -145,8 +165,30 @@ export class RaceHost {
 
   // ---------- helpers ----------
 
+  private countFps(deltaMs: number) {
+    this.fpsFrames++;
+    this.fpsMs += deltaMs;
+    if (this.fpsMs < 1000) return;
+    this.fps = (this.fpsFrames * 1000) / this.fpsMs;
+    this.fpsFrames = 0;
+    this.fpsMs = 0;
+    if (this.phase === "race") this.match.fps.push(this.fps);
+  }
+
   private finish() {
-    this.results = standings(this.race!);
+    const r = this.race!;
+    this.results = standings(r);
+    this.log({
+      e: "match_finished",
+      track: r.track.def.id,
+      players: r.cars.length,
+      ms: Math.round(r.tick * DT * 1000),
+      finishers: r.cars.filter((c) => c.finishMs !== null).length,
+      disconnects: this.match.disconnects,
+    });
+    const { stats, fps } = this.match;
+    if (stats.length) this.log({ e: "latency", p50: percentile(stats, 50)!, p95: percentile(stats, 95)!, n: stats.length });
+    if (fps.length) this.log({ e: "fps", avg: Math.round(fps.reduce((a, b) => a + b, 0) / fps.length), min: Math.round(Math.min(...fps)) });
     this.send({ v: 1, t: "result", places: this.results });
     this.setPhase("results");
   }

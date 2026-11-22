@@ -2,6 +2,7 @@
 
 import QRCode from "qrcode";
 import { useEffect, useReducer, useRef, useState } from "react";
+import { analytics } from "@/shared/analytics";
 import { DEFAULT_TRACK, LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
 import { t } from "@/shared/strings";
 import { openRoom, randomToken, send, store } from "@/shared/net";
@@ -28,7 +29,7 @@ export default function HostApp() {
 
   // One RaceHost for the life of the page; it sends through whichever socket is current.
   if (!hostRef.current) {
-    hostRef.current = new RaceHost(null, (m) => send(wsRef.current, m), rerender);
+    hostRef.current = new RaceHost(null, (m) => send(wsRef.current, m), rerender, analytics.log);
   }
   const host = hostRef.current;
   // Dev-only handle for debugging from the browser console.
@@ -40,6 +41,8 @@ export default function HostApp() {
     const room = saved ?? { code: randomCode(), seat: randomToken() };
     store.set(HOST_KEY, room);
     setCode(room.code);
+    analytics.setContext({ role: "host", room: room.code });
+    if (!saved) analytics.log({ e: "room_created" });
   }, []);
 
   useEffect(() => {
@@ -51,7 +54,13 @@ export default function HostApp() {
       setOnline(true);
       send(ws, { v: 1, t: "hosthello", seat });
     });
-    ws.addEventListener("close", () => setOnline(false));
+    let wasOpen = false;
+    ws.addEventListener("open", () => (wasOpen = true));
+    ws.addEventListener("close", () => {
+      setOnline(false);
+      if (wasOpen) analytics.log({ e: "disconnect", who: "host", phase: host.phase });
+      wasOpen = false;
+    });
     ws.addEventListener("message", (e) => {
       const m = parseMsg(e.data);
       if (!m) return;
@@ -77,7 +86,10 @@ export default function HostApp() {
             // Code collision with another live room: start over with a fresh code.
             store.set(HOST_KEY, { code: randomCode(), seat: randomToken() });
             ws.close();
-            setCode(store.get<{ code: string }>(HOST_KEY)!.code);
+            const fresh = store.get<{ code: string }>(HOST_KEY)!.code;
+            analytics.setContext({ room: fresh });
+            analytics.log({ e: "room_created" });
+            setCode(fresh);
           }
           break;
       }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { analytics } from "@/shared/analytics";
 import { CAR_COLORS, HEARTBEAT_MS, isValidCode, LAPS, PING_MS, RTT_GREEN, RTT_YELLOW } from "@/shared/constants";
 import { randomName } from "@/shared/names";
 import { openRoom, send, store } from "@/shared/net";
@@ -39,10 +40,13 @@ export default function PhoneApp() {
 
   // Room code from the QR link. If we already have a seat in this room, rejoin straight away.
   useEffect(() => {
-    const room = new URLSearchParams(location.search).get("room")?.toUpperCase() ?? "";
+    const q = new URLSearchParams(location.search);
+    const room = q.get("room")?.toUpperCase() ?? "";
     setName(randomName());
     if (isValidCode(room)) {
       setCode(room);
+      analytics.setContext({ role: "phone", room });
+      if (!store.get<Seat>(seatKey(room))) analytics.log({ e: "join_opened", via: q.get("via") === "code" ? "code" : "qr" });
       if (store.get<Seat>(seatKey(room))) setJoining(true);
     }
   }, []);
@@ -201,7 +205,7 @@ export default function PhoneApp() {
           className="w-56 rounded-xl bg-white/10 p-4 text-center font-mono tracking-[0.3em] select-text"
           style={{ fontSize: 48 }}
         />
-        <Big disabled={!isValidCode(typed)} onPress={() => location.assign(`/play?room=${typed}`)}>
+        <Big disabled={!isValidCode(typed)} onPress={() => location.assign(`/play?room=${typed}&via=code`)}>
           {t("phone.next")}
         </Big>
       </Screen>

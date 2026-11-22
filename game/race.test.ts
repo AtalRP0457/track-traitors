@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { AnalyticsEvent } from "../shared/analytics";
 import type { AnyMsg, LobbyMsg } from "../shared/protocol";
 import { percentile, RaceHost } from "./race";
 import { loadTestTrack } from "./test-tracks";
 
 function setup() {
   const out: AnyMsg[] = [];
-  const host = new RaceHost(loadTestTrack(), (m) => out.push(m), () => {});
+  const events: AnalyticsEvent[] = [];
+  const host = new RaceHost(loadTestTrack(), (m) => out.push(m), () => {}, (e) => events.push(e));
   const lobby: LobbyMsg = {
     v: 1, t: "lobby", code: "ABCD", vip: "a", phase: "lobby", host: true,
     players: [
@@ -14,10 +16,27 @@ function setup() {
     ],
   };
   host.setLobby(lobby);
-  return { host, out, lobby };
+  return { host, out, lobby, events };
 }
 
 describe("RaceHost", () => {
+  it("logs analytics for joins, disconnects and a whole match", () => {
+    const { host, lobby, events } = setup();
+    expect(events.filter((e) => e.e === "player_joined")).toHaveLength(2);
+    host.start();
+    host.update(3100);
+    host.setLobby({ ...lobby, phase: "race", players: [lobby.players[0], { ...lobby.players[1], on: false }] });
+    host.onStat("a", 40);
+    host.onStat("a", 60);
+    for (let i = 0; i < 60 * 200 && host.phase === "race"; i++) host.update(1000 / 60);
+    const names = events.map((e) => e.e);
+    expect(names).toEqual(["player_joined", "player_joined", "match_started", "disconnect", "match_finished", "latency", "fps"]);
+    const done = events.find((e) => e.e === "match_finished");
+    expect(done).toMatchObject({ track: "sunny-cove", players: 2, disconnects: 1 });
+    expect(events.find((e) => e.e === "latency")).toMatchObject({ n: 2 });
+    expect(events.find((e) => e.e === "fps")).toMatchObject({ avg: 60 });
+  });
+
   it("goes countdown → race → results and reports places", () => {
     const { host, out } = setup();
     host.start();

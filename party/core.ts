@@ -3,6 +3,7 @@
 
 import { CAR_COLORS, DEFAULT_TRACK, LAPS, MAX_PLAYERS, SEAT_HOLD_MS } from "../shared/constants";
 import { isListName, randomName } from "../shared/names";
+import { t as text } from "../shared/strings";
 import { parseMsg, type AnyMsg, type LobbyMsg, type Phase, type PlayerInfo } from "../shared/protocol";
 
 export interface RoomIO {
@@ -83,7 +84,7 @@ export class RoomCore {
         this.host.conn = connId;
         this.io.clearTimer("host");
       } else {
-        this.io.send(connId, { v: 1, t: "error", code: "taken", msg: "That room code is in use." });
+        this.io.send(connId, { v: 1, t: "error", code: "taken", msg: text("error.taken") });
         return;
       }
       this.sendLobby();
@@ -157,7 +158,7 @@ export class RoomCore {
 
   private join(connId: string, role: { kind: "phone"; pid: string | null }, m: { [k: string]: unknown }) {
     if (!this.host) {
-      this.io.send(connId, { v: 1, t: "error", code: "no_room", msg: "No room with that code. Check the TV." });
+      this.io.send(connId, { v: 1, t: "error", code: "no_room", msg: text("error.no_room") });
       return;
     }
 
@@ -177,11 +178,11 @@ export class RoomCore {
 
     // New players can join in the lobby or while results are showing (they race next time).
     if (this.phase !== "lobby" && this.phase !== "results") {
-      this.io.send(connId, { v: 1, t: "error", code: "started", msg: "This race already started. Join the next one!" });
+      this.io.send(connId, { v: 1, t: "error", code: "started", msg: text("error.started") });
       return;
     }
     if (this.players.size >= MAX_PLAYERS) {
-      this.io.send(connId, { v: 1, t: "error", code: "full", msg: "This room is full (8 players)." });
+      this.io.send(connId, { v: 1, t: "error", code: "full", msg: text("error.full") });
       return;
     }
 
@@ -227,7 +228,7 @@ export class RoomCore {
     for (const p of this.players.values()) {
       this.io.clearTimer(`seat:${p.pid}`);
       if (p.conn) {
-        this.io.send(p.conn, { v: 1, t: "error", code: "closed", msg: "The host left. Room closed." });
+        this.io.send(p.conn, { v: 1, t: "error", code: "closed", msg: text("error.closed") });
         this.io.close(p.conn);
       }
     }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { t } from "@/shared/strings";
 
 /**
  * Two big steering halves. Reacts on pointerdown (never click), supports multi-touch,
@@ -84,10 +85,10 @@ export default function Controls({ color, onSteer }: { color: string; onSteer: (
   const half = "flex flex-1 items-center justify-center text-8xl font-black transition-none";
   return (
     <div className="absolute inset-0 flex gap-2 p-2 pt-14">
-      <div ref={leftRef} className={half + " rounded-3xl"} style={{ background: "rgba(255,255,255,0.08)", touchAction: "none" }} aria-label="Steer left">
+      <div ref={leftRef} className={half + " rounded-3xl"} style={{ background: "rgba(255,255,255,0.08)", touchAction: "none" }} aria-label={t("phone.steerLeft")}>
         ◀
       </div>
-      <div ref={rightRef} className={half + " rounded-3xl"} style={{ background: "rgba(255,255,255,0.08)", touchAction: "none" }} aria-label="Steer right">
+      <div ref={rightRef} className={half + " rounded-3xl"} style={{ background: "rgba(255,255,255,0.08)", touchAction: "none" }} aria-label={t("phone.steerRight")}>
         ▶
       </div>
     </div>

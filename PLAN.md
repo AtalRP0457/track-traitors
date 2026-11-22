@@ -329,7 +329,7 @@ Do not start a phase until the previous gate passes.
 |---|---|---|
 | Dev tools | /dev page that opens 1–7 fake phone controllers (bots sending inputs) so one person can test an 8-player race; latency/packet-loss simulator; overlay with fps, ping per player, messages per second | 1 (add now if missing) |
 | Track loader | Tracks load only from the JSON format, never hard-coded | 1 (add now if missing) |
-| Strings file | All on-screen text in strings/en.json | 1 |
+| Strings file | All on-screen text in strings/en.json, used via `t("key", {vars})` from `shared/strings.ts` (room-server error texts too). Dev-only screens (/dev, host D overlay) are exempt | 1 |
 | Analytics events | Log room created, player joined, match started/finished, vote result, disconnect, latency, fps | 1 |
 | Host settings | Races (1/3/5), traitors (auto/1/2), trap cards per player (1/2), items on/off, bots on/off | 2 |
 | Reactions | 6 fixed emoji-style buttons on phones (no text), floating on the big screen | 2 |

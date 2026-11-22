@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CAR_COLORS, HEARTBEAT_MS, isValidCode, LAPS, PING_MS, RTT_GREEN, RTT_YELLOW } from "@/shared/constants";
 import { randomName } from "@/shared/names";
 import { openRoom, send, store } from "@/shared/net";
+import { ordinal, t } from "@/shared/strings";
 import { parseMsg, type ErrorMsg, type LobbyMsg, type Phase, type ResultMsg, type WelcomeMsg } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
 import Controls from "./Controls";
@@ -181,8 +182,8 @@ export default function PhoneApp() {
   if (error) {
     return (
       <Screen>
-        <p className="text-2xl font-bold">{error.msg}</p>
-        <Big onPress={() => location.assign(error.code === "started" ? `/play?room=${code}` : "/play")}>Try again</Big>
+        <p className="text-2xl font-bold">{t(`error.${error.code}`)}</p>
+        <Big onPress={() => location.assign(error.code === "started" ? `/play?room=${code}` : "/play")}>{t("phone.tryAgain")}</Big>
       </Screen>
     );
   }
@@ -190,7 +191,7 @@ export default function PhoneApp() {
   if (!code) {
     return (
       <Screen>
-        <h1 className="text-3xl font-black">Enter room code</h1>
+        <h1 className="text-3xl font-black">{t("phone.enterCode")}</h1>
         <input
           value={typed}
           onChange={(e) => setTyped(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4))}
@@ -201,7 +202,7 @@ export default function PhoneApp() {
           style={{ fontSize: 48 }}
         />
         <Big disabled={!isValidCode(typed)} onPress={() => location.assign(`/play?room=${typed}`)}>
-          Next
+          {t("phone.next")}
         </Big>
       </Screen>
     );
@@ -210,11 +211,11 @@ export default function PhoneApp() {
   if (!joining) {
     return (
       <Screen>
-        <div className="opacity-70">Room {code}</div>
-        <h1 className="text-3xl font-black">Your racer</h1>
+        <div className="opacity-70">{t("phone.room", { code })}</div>
+        <h1 className="text-3xl font-black">{t("phone.yourRacer")}</h1>
         <div className="flex items-center gap-3">
           <span className="text-2xl font-bold">{name}</span>
-          <button onPointerDown={() => setName(randomName())} className="rounded-full bg-white/15 px-4 py-2 text-xl" aria-label="New name">
+          <button onPointerDown={() => setName(randomName())} className="rounded-full bg-white/15 px-4 py-2 text-xl" aria-label={t("phone.newName")}>
             🎲
           </button>
         </div>
@@ -223,13 +224,13 @@ export default function PhoneApp() {
             <button
               key={c}
               onPointerDown={() => setColor(c)}
-              aria-label={`Color ${c}`}
+              aria-label={t("phone.color", { color: c })}
               className="h-14 w-14 rounded-full"
               style={{ background: c, outline: c === color ? "4px solid white" : "none", outlineOffset: 3 }}
             />
           ))}
         </div>
-        <Big onPress={() => setJoining(true)}>Join</Big>
+        <Big onPress={() => setJoining(true)}>{t("phone.join")}</Big>
       </Screen>
     );
   }
@@ -237,7 +238,7 @@ export default function PhoneApp() {
   if (!me || !lobby) {
     return (
       <Screen>
-        <p className="text-2xl">{connected ? "Joining…" : "Connecting…"}</p>
+        <p className="text-2xl">{connected ? t("phone.joining") : t("phone.connecting")}</p>
       </Screen>
     );
   }
@@ -256,13 +257,13 @@ export default function PhoneApp() {
             <span className="h-4 w-4 rounded-full" style={{ background: me.color }} />
             {me.name}
           </span>
-          <span>{lap >= LAPS ? "🏁 Finished!" : `Lap ${Math.min(lap + 1, LAPS)}/${LAPS}`}</span>
+          <span>{lap >= LAPS ? t("race.finished") : t("race.lap", { lap: Math.min(lap + 1, LAPS), laps: LAPS })}</span>
           {status}
         </div>
         {phase === "countdown" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-9xl font-black">{left || "GO"}</div>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-9xl font-black">{left || t("race.go")}</div>
         )}
-        {!hostOk && <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-yellow-500 p-2 text-center font-bold text-black">Host disconnected — waiting…</div>}
+        {!hostOk && <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-yellow-500 p-2 text-center font-bold text-black">{t("race.hostGone")}</div>}
       </main>
     );
   }
@@ -274,17 +275,17 @@ export default function PhoneApp() {
       <div className="absolute right-4 top-4">{status}</div>
       <div className="h-16 w-16 rounded-full" style={{ background: me.color }} />
       <h1 className="text-3xl font-black">{me.name}</h1>
-      {!lobby.host && <p className="text-xl text-yellow-300">Host disconnected — waiting…</p>}
+      {!lobby.host && <p className="text-xl text-yellow-300">{t("race.hostGone")}</p>}
       {phase === "results" && myPlace >= 0 && (
         <p className="text-4xl font-black">
-          {["🥇", "🥈", "🥉"][myPlace] ?? ""} {ordinal(myPlace + 1)} place
+          {t("phone.place", { medal: ["🥇", "🥈", "🥉"][myPlace] ?? "", n: ordinal(myPlace + 1) })}
         </p>
       )}
-      <p className="text-xl opacity-80">{lobby.players.length} in the room</p>
+      <p className="text-xl opacity-80">{t("phone.inRoom", { n: lobby.players.length })}</p>
       {isVip ? (
-        <Big onPress={startReq}>{phase === "results" ? "Race again" : "Start race"}</Big>
+        <Big onPress={startReq}>{phase === "results" ? t("race.raceAgain") : t("race.startRace")}</Big>
       ) : (
-        <p className="text-xl opacity-80">Waiting for {lobby.players.find((p) => p.pid === lobby.vip)?.name ?? "host"} to start…</p>
+        <p className="text-xl opacity-80">{t("phone.waitingFor", { name: lobby.players.find((p) => p.pid === lobby.vip)?.name ?? t("phone.theHost") })}</p>
       )}
     </Screen>
   );
@@ -327,8 +328,4 @@ function Status({ connected, host, rtt, tt }: { connected: boolean; host: boolea
 function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.floor(s.length / 2)];
-}
-
-function ordinal(n: number): string {
-  return n + (["th", "st", "nd", "rd"][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] ?? "th");
 }

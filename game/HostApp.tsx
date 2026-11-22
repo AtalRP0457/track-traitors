@@ -2,7 +2,8 @@
 
 import QRCode from "qrcode";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { DEFAULT_TRACK, LAPS, randomCode } from "@/shared/constants";
+import { DEFAULT_TRACK, LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
+import { t } from "@/shared/strings";
 import { openRoom, randomToken, send, store } from "@/shared/net";
 import { parseMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
@@ -94,7 +95,7 @@ export default function HostApp() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         host.track = buildTrack(parseTrack(await res.json()));
       } catch (e) {
-        setTrackError(`Could not load track "${DEFAULT_TRACK}": ${(e as Error).message}`);
+        setTrackError(t("host.trackError", { id: DEFAULT_TRACK, err: (e as Error).message }));
         return;
       }
       const { createGame } = await import("./scene");
@@ -159,19 +160,19 @@ export default function HostApp() {
         <Overlay>
           <div className="flex flex-wrap items-center justify-center gap-12">
             <div className="text-center">
-              <div className="text-xl uppercase tracking-widest opacity-70">Room code</div>
+              <div className="text-xl uppercase tracking-widest opacity-70">{t("host.roomCode")}</div>
               <div className="font-mono text-8xl font-black tracking-[0.2em]">{code ?? "····"}</div>
               <div className="mt-2 text-lg opacity-70">{joinUrl}</div>
               <div className="mt-2 text-sm">
-                <span className={online ? "text-green-400" : "text-red-400"}>●</span> {online ? "Room server connected" : "Connecting to room server…"}
+                <span className={online ? "text-green-400" : "text-red-400"}>●</span> {online ? t("host.serverOk") : t("host.serverWait")}
               </div>
             </div>
-            {qr && <img src={qr} alt="Scan to join" className="h-72 w-72 rounded-2xl bg-white p-2" />}
+            {qr && <img src={qr} alt={t("host.qrAlt")} className="h-72 w-72 rounded-2xl bg-white p-2" />}
           </div>
           <section className="w-full max-w-3xl">
-            <h2 className="mb-3 text-2xl font-bold">Players ({lobby?.players.length ?? 0}/8)</h2>
+            <h2 className="mb-3 text-2xl font-bold">{t("host.players", { n: lobby?.players.length ?? 0, max: MAX_PLAYERS })}</h2>
             <PlayerGrid players={lobby?.players ?? []} vip={lobby?.vip ?? null} />
-            {lobby && lobby.players.length === 0 && <p className="opacity-70">Scan the QR code with your phone to join.</p>}
+            {lobby && lobby.players.length === 0 && <p className="opacity-70">{t("host.scanToJoin")}</p>}
           </section>
           <div className="flex items-center gap-6">
             <button
@@ -180,10 +181,10 @@ export default function HostApp() {
               className="rounded-2xl px-8 py-4 text-2xl font-black text-black disabled:opacity-30"
               style={{ background: "var(--racer)" }}
             >
-              Start race
+              {t("race.startRace")}
             </button>
             <button onClick={newRoom} className="text-sm underline opacity-50">
-              New room code
+              {t("host.newCode")}
             </button>
           </div>
         </Overlay>
@@ -206,7 +207,7 @@ export default function HostApp() {
                   <span className="w-6 opacity-70">{i + 1}</span>
                   <span className="h-3 w-3 rounded-full" style={{ background: p?.color }} />
                   <span style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
-                  <span className="ml-auto pl-4 text-sm opacity-70">{c.finishMs !== null ? "🏁" : `Lap ${Math.min(c.lap + 1, LAPS)}/${LAPS}`}</span>
+                  <span className="ml-auto pl-4 text-sm opacity-70">{c.finishMs !== null ? "🏁" : t("race.lap", { lap: Math.min(c.lap + 1, LAPS), laps: LAPS })}</span>
                 </li>
               );
             })}
@@ -215,7 +216,7 @@ export default function HostApp() {
 
       {phase === "results" && (
         <Overlay>
-          <h1 className="text-6xl font-black">Results</h1>
+          <h1 className="text-6xl font-black">{t("host.results")}</h1>
           <ol className="w-full max-w-xl space-y-2">
             {host.results.map((r, i) => {
               const p = byPid.get(r.pid);
@@ -223,25 +224,25 @@ export default function HostApp() {
                 <li key={r.pid} className="flex items-center gap-4 rounded-xl bg-white/10 p-3 text-2xl font-bold">
                   <span className="w-10 text-3xl">{["🥇", "🥈", "🥉"][i] ?? i + 1}</span>
                   <span className="h-5 w-5 rounded-full" style={{ background: p?.color }} />
-                  <span>{p?.name ?? "Left the room"}</span>
-                  <span className="ml-auto font-mono text-xl opacity-80">{r.ms !== null ? (r.ms / 1000).toFixed(2) + "s" : "DNF"}</span>
+                  <span>{p?.name ?? t("host.leftRoom")}</span>
+                  <span className="ml-auto font-mono text-xl opacity-80">{r.ms !== null ? (r.ms / 1000).toFixed(2) + "s" : t("host.dnf")}</span>
                 </li>
               );
             })}
           </ol>
           <div className="flex gap-4">
             <button onClick={() => host.start()} className="rounded-2xl px-8 py-4 text-2xl font-black text-black" style={{ background: "var(--racer)" }}>
-              Race again
+              {t("race.raceAgain")}
             </button>
             <button onClick={() => host.backToLobby()} className="rounded-2xl border-2 px-8 py-4 text-2xl font-bold" style={{ borderColor: "var(--racer)" }}>
-              Lobby
+              {t("host.lobby")}
             </button>
           </div>
         </Overlay>
       )}
 
       {phase !== "lobby" && lobby && !online && (
-        <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">Lost connection to the room server — reconnecting…</div>
+        <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{t("host.lostServer")}</div>
       )}
 
       {trackError && <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{trackError}</div>}
@@ -262,7 +263,7 @@ function PlayerGrid({ players, vip }: { players: PlayerInfo[]; vip: string | nul
         <li key={p.pid} className="rounded-xl p-3 font-bold text-black" style={{ background: p.color, opacity: p.on ? 1 : 0.4 }}>
           {p.name}
           {p.pid === vip && " ★"}
-          {!p.on && <div className="text-xs font-normal">reconnecting…</div>}
+          {!p.on && <div className="text-xs font-normal">{t("host.reconnecting")}</div>}
         </li>
       ))}
     </ul>

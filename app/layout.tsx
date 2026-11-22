@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { t } from "@/shared/strings";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Track Traitors",
-  description: "Race your friends. Hide traps on their track. Find the traitor before the finish line.",
+  title: t("meta.title"),
+  description: t("meta.tagline"),
 };
 
 export const viewport: Viewport = {

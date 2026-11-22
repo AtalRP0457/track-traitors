@@ -37,6 +37,8 @@ export class RaceHost {
   fps = 0;
   private fpsFrames = 0;
   private fpsMs = 0;
+  /** Dev hook: runs after every physics tick (fake-phone bots). */
+  afterTick?: () => void;
   /** Per-match numbers for analytics. */
   private match = { stats: [] as number[], fps: [] as number[], disconnects: 0 };
 
@@ -136,6 +138,8 @@ export class RaceHost {
       this.send({ v: 1, t: "lap", p: pid, lap: car.lap, laps: r.laps });
       if (car.finishMs !== null && this.firstFinishTick === null) this.firstFinishTick = r.tick;
     }
+
+    this.afterTick?.();
 
     const allDone = r.cars.every((c) => c.finishMs !== null);
     const graceOver = this.firstFinishTick !== null && (r.tick - this.firstFinishTick) * DT * 1000 >= FINISH_GRACE_MS;

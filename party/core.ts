@@ -140,7 +140,10 @@ export class RoomCore {
         break;
       }
       case "ping":
-        if (hostConn != null) this.io.send(hostConn, { v: 1, t: "ping", p: p.pid, k: Number(m.k) });
+        if (hostConn != null) {
+          const r = Number(m.r);
+          this.io.send(hostConn, { v: 1, t: "ping", p: p.pid, k: Number(m.k), r: r >= 0 && r < 10_000 ? Math.round(r) : undefined });
+        }
         else this.io.send(connId, { v: 1, t: "pong", k: Number(m.k), h: 0 });
         break;
       case "startreq":

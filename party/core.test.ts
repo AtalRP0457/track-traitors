@@ -76,6 +76,10 @@ describe("RoomCore", () => {
     const a = joinPhone("A");
     r.msg("A", { t: "ping", k: 3 });
     expect(r.last("H", "ping")).toMatchObject({ p: a.pid, k: 3 });
+    r.msg("A", { t: "ping", k: 4, r: 42.4 });
+    expect(r.last("H", "ping")).toMatchObject({ p: a.pid, k: 4, r: 42 });
+    r.msg("A", { t: "ping", k: 5, r: -1 });
+    expect(r.last("H", "ping")!.r).toBeUndefined();
     r.msg("H", { t: "pong", k: 3, p: a.pid });
     expect(r.last("A", "pong")).toEqual({ v: 1, t: "pong", k: 3, h: 1 });
   });

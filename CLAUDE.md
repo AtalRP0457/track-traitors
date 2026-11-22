@@ -27,6 +27,7 @@ Read PLAN.md before any task. It is the source of truth for game rules, architec
 - Both at once: `npm run dev:all`
 - Tests: `npm test` · Typecheck: `npm run typecheck`
 - Rebuild track images after editing a track JSON: `npm run tracks`
+- Solo testing: open `/host`, then `/dev` in another tab of the same browser and pick 1–7 fake phones. Host overlay: press D
 
 ## Testing checklist for every controller change
 - Real iPhone (Safari) and real Android (Chrome)

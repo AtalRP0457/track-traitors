@@ -19,8 +19,9 @@ export interface PlayerInfo {
 export interface JoinMsg { v: 1; t: "join"; pid: string; seat: string; name: string; color: string }
 /** Steering input. s = -1/0/1, b = brake, g = glitch, k = input sequence number. */
 export interface InputMsg { v: 1; t: "in"; s: -1 | 0 | 1; b: 0 | 1; g: 0 | 1; k: number }
-/** Round-trip probe. Answered by the host (h:1) or by the room if no host is online (h:0). */
-export interface PingMsg { v: 1; t: "ping"; k: number }
+/** Round-trip probe. Answered by the host (h:1) or by the room if no host is online (h:0).
+ *  r = the phone's current median round trip (ms), shown per player on the host overlay. */
+export interface PingMsg { v: 1; t: "ping"; k: number; r?: number }
 /** VIP asks to start (or restart after results). */
 export interface StartReqMsg { v: 1; t: "startreq" }
 /** Measured touch → TV time for one input, in ms. Used for the latency gate. */
@@ -48,7 +49,7 @@ export type HostToRoom = HostHelloMsg | PhaseMsg | PongMsg | AckMsg | LapMsg | R
 export interface LobbyMsg { v: 1; t: "lobby"; code: string; players: PlayerInfo[]; vip: string | null; phase: Phase; host: boolean }
 /** Input forwarded to the host with the sender's pid. */
 export interface FwdInputMsg { v: 1; t: "in"; p: string; s: -1 | 0 | 1; b: 0 | 1; g: 0 | 1; k: number }
-export interface FwdPingMsg { v: 1; t: "ping"; p: string; k: number }
+export interface FwdPingMsg { v: 1; t: "ping"; p: string; k: number; r?: number }
 export interface StartMsg { v: 1; t: "start"; mode: "classic"; track: string }
 export interface FwdStatMsg { v: 1; t: "stat"; p: string; tt: number }
 

@@ -48,6 +48,20 @@ describe.each(trackIds())("track %s", (id) => {
     }
     expect(r.cars.every((c) => c.finishMs !== null)).toBe(true);
   });
+
+  it("bots change buttons no faster than a human thumb", () => {
+    const t = buildTrack(readTrackFile(id));
+    const r = createRace(t, ["a"], 2);
+    const b = newBrain(0.5);
+    let changes = 0, last = 0;
+    for (let i = 0; i < 60 * 20; i++) {
+      const s = botSteer(t, b, r.cars[0].x, r.cars[0].y, r.cars[0].a);
+      if (s !== last) changes++;
+      last = r.cars[0].steer = s;
+      step(r);
+    }
+    expect(changes / 20).toBeLessThanOrEqual(10); // ≤ 10 presses/releases per second
+  });
 });
 
 describe("track validator", () => {

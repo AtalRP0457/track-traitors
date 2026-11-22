@@ -156,7 +156,7 @@ Phase 1 also uses these (see `shared/protocol.ts` for the exact types):
 {"v":1,"t":"hosthello","seat":"<token>"}                      // host → room, claims or rejoins the room
 {"v":1,"t":"phase","phase":"countdown","laps":2,"ms":3000}    // host → room → phones (lobby|countdown|race|results)
 {"v":1,"t":"startreq"}                                        // VIP phone → room → host ("start")
-{"v":1,"t":"ping","k":12} / {"v":1,"t":"pong","k":12,"h":1}   // phone ↔ host round trip (h:0 = room answered, host offline)
+{"v":1,"t":"ping","k":12,"r":45} / {"v":1,"t":"pong","k":12,"h":1} // phone ↔ host round trip (h:0 = room answered, host offline); r = phone's median RTT, shown on the host overlay
 {"v":1,"t":"ack","k":31}                                      // host → one phone: input 31 is applied and drawn
 {"v":1,"t":"stat","tt":42}                                    // phone → host: measured touch → TV ms
 {"v":1,"t":"lap","p":"p7","lap":1,"laps":2}                   // host → room → that phone only
@@ -327,8 +327,8 @@ Do not start a phase until the previous gate passes.
 
 | Extra | What | Phase |
 |---|---|---|
-| Dev tools | /dev page that opens 1–7 fake phone controllers (bots sending inputs) so one person can test an 8-player race; latency/packet-loss simulator; overlay with fps, ping per player, messages per second | 1 (add now if missing) |
-| Track loader | Tracks load only from the JSON format, never hard-coded | 1 (add now if missing) |
+| Dev tools | /dev page that opens 1–7 fake phone controllers (bots sending inputs) so one person can test an 8-player race; latency/packet-loss simulator; overlay with fps, ping per player, messages per second. **Done:** fake phones speak the real phone protocol over the room server; the host tab (same browser) computes each bot's button with `game/bot.ts` and hands it over a BroadcastChannel, never the network. Bots hold a button ≥ 100 ms like a thumb. Simulator: sliders on /dev, or `?lag=&jitter=&loss=` on a real phone's /play URL (loss drops only `in`). Host overlay: key D. /dev is off in production builds | 1 |
+| Track loader | Tracks load only from the JSON format, never hard-coded. **Done** (section 2b) | 1 |
 | Strings file | All on-screen text in strings/en.json, used via `t("key", {vars})` from `shared/strings.ts` (room-server error texts too). Dev-only screens (/dev, host D overlay) are exempt | 1 |
 | Analytics events | Log room created, player joined, match started/finished, vote result, disconnect, latency, fps. `shared/analytics.ts`; host logs game events (it is the referee), phones log `join_opened` (QR vs typed code) for the scan→join funnel. No names or personal data. Phase 1 sink = last 200 events in localStorage `tt-events` (+ console in dev); Phase 3 swaps in the API Worker | 1 |
 | Host settings | Races (1/3/5), traitors (auto/1/2), trap cards per player (1/2), items on/off, bots on/off | 2 |

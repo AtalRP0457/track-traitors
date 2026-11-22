@@ -5,8 +5,9 @@ import { analytics } from "@/shared/analytics";
 import { CAR_COLORS, HEARTBEAT_MS, isValidCode, LAPS, PING_MS, RTT_GREEN, RTT_YELLOW } from "@/shared/constants";
 import { randomName } from "@/shared/names";
 import { openRoom, send, store } from "@/shared/net";
+import { NetSim, simFromQuery } from "@/shared/netsim";
 import { ordinal, t } from "@/shared/strings";
-import { parseMsg, type ErrorMsg, type LobbyMsg, type Phase, type ResultMsg, type WelcomeMsg } from "@/shared/protocol";
+import { parseMsg, type AnyMsg, type ErrorMsg, type LobbyMsg, type Phase, type ResultMsg, type WelcomeMsg } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
 import Controls from "./Controls";
 
@@ -31,6 +32,11 @@ export default function PhoneApp() {
   const [tt, setTt] = useState<number | null>(null);
   const [, setNow] = useState(0);
   const wsRef = useRef<PartySocket | null>(null);
+  // Dev: ?lag=&jitter=&loss= on the /play URL simulates a bad network on this phone.
+  const sim = useRef<NetSim | null>(null);
+  if (!sim.current) sim.current = new NetSim(typeof location === "undefined" ? undefined : simFromQuery(new URLSearchParams(location.search)));
+  /** Send through the (optional) network simulator. Steering input may be dropped by it. */
+  const tx = (msg: AnyMsg) => sim.current!.out(() => send(wsRef.current, msg), msg.t === "in");
 
   // Input state lives in refs: it changes faster than React should re-render.
   const input = useRef({ s: 0 as -1 | 0 | 1, k: 0 });
@@ -58,10 +64,10 @@ export default function PhoneApp() {
     ws.addEventListener("open", () => {
       setConnected(true);
       const saved = store.get<Seat>(seatKey(code));
-      send(ws, { v: 1, t: "join", pid: saved?.pid ?? "", seat: saved?.seat ?? "", name: saved?.name ?? name, color: saved?.color ?? color });
+      tx({ v: 1, t: "join", pid: saved?.pid ?? "", seat: saved?.seat ?? "", name: saved?.name ?? name, color: saved?.color ?? color });
     });
     ws.addEventListener("close", () => setConnected(false));
-    ws.addEventListener("message", (e) => {
+    ws.addEventListener("message", sim.current!.in((e: MessageEvent) => {
       const m = parseMsg(e.data);
       if (!m) return;
       switch (m.t) {
@@ -110,7 +116,7 @@ export default function PhoneApp() {
           const half = rtts.current.length ? median(rtts.current) / 2 : 0;
           const ms = Math.max(0, performance.now() - at - half);
           setTt(ms);
-          send(ws, { v: 1, t: "stat", tt: Math.round(ms) });
+          tx({ v: 1, t: "stat", tt: Math.round(ms) });
           break;
         }
         case "error":
@@ -119,17 +125,17 @@ export default function PhoneApp() {
           ws.close();
           break;
       }
-    });
+    }));
 
     // Ping for the latency dot; heartbeat re-sends the current input once a second.
     let pk = 0;
     const pingId = setInterval(() => {
       pings.current.set(++pk, performance.now());
       if (pings.current.size > 10) pings.current.delete(pk - 10);
-      send(ws, { v: 1, t: "ping", k: pk });
+      tx({ v: 1, t: "ping", k: pk, r: rtts.current.length ? Math.round(median(rtts.current)) : undefined });
     }, PING_MS);
     const beatId = setInterval(() => {
-      send(ws, { v: 1, t: "in", s: input.current.s, b: 0, g: 0, k: input.current.k });
+      tx({ v: 1, t: "in", s: input.current.s, b: 0, g: 0, k: input.current.k });
     }, HEARTBEAT_MS);
 
     // Back from lock screen: don't wait for the backoff timer, reconnect now.
@@ -176,10 +182,10 @@ export default function PhoneApp() {
     input.current.s = s;
     touchAt.current.set(k, at);
     if (touchAt.current.size > 20) touchAt.current.delete(k - 20);
-    send(wsRef.current, { v: 1, t: "in", s, b: 0, g: 0, k });
+    tx({ v: 1, t: "in", s, b: 0, g: 0, k });
   };
 
-  const startReq = () => send(wsRef.current, { v: 1, t: "startreq" });
+  const startReq = () => tx({ v: 1, t: "startreq" });
 
   // ---------- screens ----------
 

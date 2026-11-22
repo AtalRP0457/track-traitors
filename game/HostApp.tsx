@@ -6,8 +6,9 @@ import { analytics } from "@/shared/analytics";
 import { DEFAULT_TRACK, LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
 import { t } from "@/shared/strings";
 import { openRoom, randomToken, send, store } from "@/shared/net";
-import { parseMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
+import { parseMsg, type AnyMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
+import { DevBotRelay } from "./devbots";
 import { percentile, RaceHost } from "./race";
 import { parseTrack, trackUrl } from "@/shared/track-format";
 import { buildTrack } from "./track";
@@ -26,10 +27,16 @@ export default function HostApp() {
   const wsRef = useRef<PartySocket | null>(null);
   const hostRef = useRef<RaceHost | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  /** Debug overlay numbers: message counts (this second), rates (last second), ping per player. */
+  const net = useRef({ in: 0, out: 0, inRate: 0, outRate: 0, ping: new Map<string, number>(), bots: 0 });
+  const tx = (m: AnyMsg) => {
+    net.current.out++;
+    send(wsRef.current, m);
+  };
 
   // One RaceHost for the life of the page; it sends through whichever socket is current.
   if (!hostRef.current) {
-    hostRef.current = new RaceHost(null, (m) => send(wsRef.current, m), rerender, analytics.log);
+    hostRef.current = new RaceHost(null, (m) => tx(m), rerender, analytics.log);
   }
   const host = hostRef.current;
   // Dev-only handle for debugging from the browser console.
@@ -52,7 +59,7 @@ export default function HostApp() {
     wsRef.current = ws;
     ws.addEventListener("open", () => {
       setOnline(true);
-      send(ws, { v: 1, t: "hosthello", seat });
+      tx({ v: 1, t: "hosthello", seat });
     });
     let wasOpen = false;
     ws.addEventListener("open", () => (wasOpen = true));
@@ -62,6 +69,7 @@ export default function HostApp() {
       wasOpen = false;
     });
     ws.addEventListener("message", (e) => {
+      net.current.in++;
       const m = parseMsg(e.data);
       if (!m) return;
       switch (m.t) {
@@ -69,7 +77,8 @@ export default function HostApp() {
           host.onInput(String(m.p), m.s as -1 | 0 | 1, Number(m.k));
           break;
         case "ping":
-          send(ws, { v: 1, t: "pong", k: Number(m.k), p: String(m.p) });
+          tx({ v: 1, t: "pong", k: Number(m.k), p: String(m.p) });
+          if (typeof m.r === "number") net.current.ping.set(String(m.p), m.r);
           break;
         case "stat":
           host.onStat(String(m.p), Number(m.tt));
@@ -144,6 +153,28 @@ export default function HostApp() {
       cancelled = true;
     };
   }, [code]);
+
+  // Dev: steer the /dev page's fake phones (same-browser BroadcastChannel, never in production).
+  useEffect(() => {
+    if (!code || process.env.NODE_ENV === "production") return;
+    const relay = new DevBotRelay(host, code);
+    const id = setInterval(() => (net.current.bots = relay.count), 1000);
+    return () => {
+      clearInterval(id);
+      relay.dispose();
+    };
+  }, [code, host]);
+
+  // Message rates for the debug overlay.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const n = net.current;
+      n.inRate = n.in;
+      n.outRate = n.out;
+      n.in = n.out = 0;
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Live HUD (standings, countdown, debug numbers) refreshes a few times a second, not every frame.
   useEffect(() => {
@@ -259,7 +290,7 @@ export default function HostApp() {
 
       {trackError && <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{trackError}</div>}
 
-      {showDebug && <DebugPanel host={host} players={lobby?.players ?? []} />}
+      {showDebug && <DebugPanel host={host} players={lobby?.players ?? []} net={net.current} />}
     </main>
   );
 }
@@ -282,20 +313,26 @@ function PlayerGrid({ players, vip }: { players: PlayerInfo[]; vip: string | nul
   );
 }
 
-/** Press D to toggle. Shows the numbers the Phase 1 gate needs. */
-function DebugPanel({ host, players }: { host: RaceHost; players: PlayerInfo[] }) {
+/** Press D to toggle. Shows the numbers the Phase 1 gate needs. Dev-facing, so not in strings/en.json. */
+function DebugPanel({ host, players, net }: { host: RaceHost; players: PlayerInfo[]; net: { inRate: number; outRate: number; ping: Map<string, number>; bots: number } }) {
   const p50 = percentile(host.stats, 50);
   const p95 = percentile(host.stats, 95);
-  const fmt = (x: number | null) => (x === null ? "–" : `${Math.round(x)} ms`);
+  const fmt = (x: number | null | undefined) => (x == null ? "–" : `${Math.round(x)} ms`);
+  const fps = Math.round(host.fps);
   return (
     <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg bg-black/60 p-3 font-mono text-xs leading-5">
+      <div>
+        <span className={fps >= 58 ? "text-green-400" : fps >= 45 ? "text-yellow-300" : "text-red-400"}>{fps} fps</span> · msg/s in {net.inRate} · out {net.outRate}
+        {net.bots > 0 && ` · ${net.bots} dev bots`}
+      </div>
       <div className="font-bold">touch → TV (target &lt; 120 ms)</div>
       <div>
         p50 {fmt(p50)} · p95 {fmt(p95)} · n={host.stats.length}
       </div>
+      <div className="opacity-60">player: ping · touch→TV</div>
       {players.map((p) => (
         <div key={p.pid}>
-          <span style={{ color: p.color }}>■</span> {p.name}: {fmt(host.lastStat.get(p.pid) ?? null)}
+          <span style={{ color: p.color }}>■</span> {p.name}: {fmt(net.ping.get(p.pid))} · {fmt(host.lastStat.get(p.pid))}
           {!p.on && " (offline)"}
         </div>
       ))}

@@ -3,19 +3,16 @@
   "meta.tagline": "Race your friends. Hide traps on their track. Find the traitor before the finish line.",
   "meta.hostTitle": "Host · Track Traitors",
   "meta.playTitle": "Play · Track Traitors",
-
   "home.titleA": "Track",
   "home.titleB": "Traitors",
   "home.host": "Host on this screen",
   "home.join": "Join with my phone",
-
   "race.lap": "Lap {lap}/{laps}",
   "race.finished": "🏁 Finished!",
   "race.go": "GO",
   "race.startRace": "Start race",
   "race.raceAgain": "Race again",
   "race.hostGone": "Host disconnected — waiting…",
-
   "host.roomCode": "Room code",
   "host.serverOk": "Room server connected",
   "host.serverWait": "Connecting to room server…",
@@ -30,7 +27,6 @@
   "host.lobby": "Lobby",
   "host.lostServer": "Lost connection to the room server — reconnecting…",
   "host.trackError": "Could not load track \"{id}\": {err}",
-
   "phone.tryAgain": "Try again",
   "phone.enterCode": "Enter room code",
   "phone.next": "Next",
@@ -47,16 +43,21 @@
   "phone.theHost": "the host",
   "phone.steerLeft": "Steer left",
   "phone.steerRight": "Steer right",
-
   "ordinal.1": "{n}st",
   "ordinal.2": "{n}nd",
   "ordinal.3": "{n}rd",
   "ordinal.other": "{n}th",
-
   "error.no_room": "No room with that code. Check the TV.",
   "error.full": "This room is full (8 players).",
   "error.started": "This race already started. Join the next one!",
   "error.taken": "That room code is in use.",
   "error.bad_seat": "Your seat expired. Join again.",
-  "error.closed": "The host left. Room closed."
+  "error.closed": "The host left. Room closed.",
+  "banner.finalLap": "Final lap! {name} leads",
+  "banner.wins": "🏁 {name} wins!",
+  "host.fullscreen": "Fullscreen",
+  "host.exitFullscreen": "Exit fullscreen",
+  "host.farBehind": "{name} · far behind",
+  "host.slowmo": "Replay ×0.5",
+  "host.roomShort": "Room {code}"
 }

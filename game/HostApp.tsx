@@ -8,6 +8,7 @@ import { t } from "@/shared/strings";
 import { openRoom, randomToken, send, store } from "@/shared/net";
 import { parseMsg, type AnyMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
+import { Director } from "./camera";
 import { DevBotRelay } from "./devbots";
 import { percentile, RaceHost } from "./race";
 import { parseTrack, trackUrl } from "@/shared/track-format";
@@ -26,6 +27,9 @@ export default function HostApp() {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const wsRef = useRef<PartySocket | null>(null);
   const hostRef = useRef<RaceHost | null>(null);
+  const director = useRef(new Director()).current;
+  const [fullscreen, setFullscreen] = useState(false);
+  const [cursorHidden, setCursorHidden] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   /** Debug overlay numbers: message counts (this second), rates (last second), ping per player. */
   const net = useRef({ in: 0, out: 0, inRate: 0, outRate: 0, ping: new Map<string, number>(), bots: 0 });
@@ -120,14 +124,17 @@ export default function HostApp() {
         return;
       }
       const { createGame } = await import("./scene");
-      if (!cancelled && canvasRef.current) game = createGame(canvasRef.current, host);
+      if (!cancelled && canvasRef.current) {
+        game = createGame(canvasRef.current, host, director);
+        if (process.env.NODE_ENV !== "production") (window as unknown as { __ttGame: unknown }).__ttGame = game;
+      }
       rerender();
     })();
     return () => {
       cancelled = true;
       game?.destroy(true);
     };
-  }, [host]);
+  }, [host, director]);
 
   // QR points phones at /play on this machine's Wi-Fi address, not "localhost".
   useEffect(() => {
@@ -179,11 +186,42 @@ export default function HostApp() {
   // Live HUD (standings, countdown, debug numbers) refreshes a few times a second, not every frame.
   useEffect(() => {
     const id = setInterval(rerender, 200);
-    const onKey = (e: KeyboardEvent) => e.key.toLowerCase() === "d" && setShowDebug((s) => !s);
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === "d") setShowDebug((s) => !s);
+      if (k === "f") toggleFullscreen();
+      // Dev: fake a trap hit on the leader to try the trap-cut camera before traps exist.
+      if (k === "t" && process.env.NODE_ENV !== "production" && host.race) {
+        const lead = host.race.cars.reduce((a, b) => (b.dist > a.dist ? b : a));
+        const p = host.pose(lead.pid)!;
+        director.trapHit(p.x, p.y, performance.now(), host.renderTick);
+      }
+    };
+    const onFs = () => setFullscreen(!!document.fullscreenElement);
     window.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFs);
     return () => {
       clearInterval(id);
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFs);
+    };
+  }, [host, director]);
+
+  // Hide the mouse cursor after 3 s without movement.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const wake = () => {
+      setCursorHidden(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setCursorHidden(true), 3000);
+    };
+    wake();
+    window.addEventListener("pointermove", wake);
+    window.addEventListener("pointerdown", wake);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("pointermove", wake);
+      window.removeEventListener("pointerdown", wake);
     };
   }, []);
 
@@ -194,9 +232,15 @@ export default function HostApp() {
 
   const byPid = new Map((lobby?.players ?? []).map((p) => [p.pid, p]));
   const phase = host.phase;
+  const cam = host.camera;
+  const L = cam.layout;
+  const u = L?.u ?? 1;
+  const racing = (phase === "race" || phase === "countdown") && host.race;
+  const showBanner = host.banner && host.race && host.race.tick - host.banner.tick < 180;
+  const straggler = cam.straggler ? byPid.get(cam.straggler) : undefined;
 
   return (
-    <main className="fixed inset-0 overflow-hidden">
+    <main className="fixed inset-0 overflow-hidden" style={{ cursor: cursorHidden ? "none" : undefined }}>
       <div ref={canvasRef} className="absolute inset-0" />
 
       {phase === "lobby" && (
@@ -239,22 +283,69 @@ export default function HostApp() {
         </div>
       )}
 
-      {(phase === "race" || phase === "countdown") && host.race && (
-        <ol className="pointer-events-none absolute left-4 top-4 space-y-1 rounded-xl bg-black/50 p-3 text-lg font-bold">
-          {[...host.race.cars]
-            .sort((a, b) => (a.finishMs ?? Infinity) - (b.finishMs ?? Infinity) || b.dist - a.dist)
-            .map((c, i) => {
-              const p = byPid.get(c.pid);
-              return (
-                <li key={c.pid} className="flex items-center gap-2">
-                  <span className="w-6 opacity-70">{i + 1}</span>
-                  <span className="h-3 w-3 rounded-full" style={{ background: p?.color }} />
-                  <span style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
-                  <span className="ml-auto pl-4 text-sm opacity-70">{c.finishMs !== null ? "🏁" : t("race.lap", { lap: Math.min(c.lap + 1, LAPS), laps: LAPS })}</span>
-                </li>
-              );
-            })}
-        </ol>
+      {racing && L && (
+        <>
+          {/* Minimap frame (the map itself is a Phaser camera underneath). */}
+          <div className="pointer-events-none absolute rounded-lg ring-2 ring-white/40" style={{ left: L.minimap.x, top: L.minimap.y, width: L.minimap.w, height: L.minimap.h }} />
+
+          {/* Straggler window frame + name. */}
+          {straggler && (
+            <div
+              className="pointer-events-none absolute rounded-lg ring-4"
+              style={{ left: L.straggler.x, top: L.straggler.y, width: L.straggler.w, height: L.straggler.h, boxShadow: `0 0 0 ${4 * u}px ${straggler.color}` }}
+            >
+              <div className="absolute -top-1 left-0 -translate-y-full rounded bg-black/60 px-2 font-bold" style={{ fontSize: 16 * u }}>
+                {t("host.farBehind", { name: straggler.name })}
+              </div>
+            </div>
+          )}
+
+          {/* Positions tower, right edge. */}
+          <ol className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 space-y-1 overflow-hidden rounded-l-2xl bg-black/55 font-bold" style={{ width: L.towerW, padding: 12 * u, fontSize: 22 * u }}>
+            {[...host.race!.cars]
+              .sort((a, b) => (a.finishMs ?? Infinity) - (b.finishMs ?? Infinity) || b.dist - a.dist)
+              .map((c, i) => {
+                const p = byPid.get(c.pid);
+                return (
+                  <li key={c.pid} className="flex items-center" style={{ gap: 8 * u }}>
+                    <span className="opacity-70" style={{ width: 24 * u }}>{i + 1}</span>
+                    <span className="rounded-full" style={{ background: p?.color, width: 14 * u, height: 14 * u }} />
+                    <span className="truncate" style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
+                    <span className="ml-auto shrink-0 opacity-70" style={{ paddingLeft: 8 * u, fontSize: 15 * u }}>
+                      {c.finishMs !== null ? "🏁" : t("race.lap", { lap: Math.min(c.lap + 1, LAPS), laps: LAPS })}
+                    </span>
+                  </li>
+                );
+              })}
+          </ol>
+
+          {/* Event banners, top center. */}
+          {showBanner && (
+            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 rounded-2xl bg-black/65 font-black" style={{ top: L.pad, padding: `${8 * u}px ${24 * u}px`, fontSize: 36 * u }}>
+              {t(host.banner!.key, host.banner!.vars)}
+            </div>
+          )}
+          {cam.slowmo && (
+            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 rounded bg-[var(--traitor)] font-black uppercase tracking-widest text-black" style={{ top: L.pad + 80 * u, padding: `${2 * u}px ${10 * u}px`, fontSize: 16 * u }}>
+              {t("host.slowmo")}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Bottom left: room code + fullscreen (outside the lobby, which shows them big). */}
+      {phase !== "lobby" && (
+        <div className="absolute flex items-center font-bold" style={{ left: L?.pad ?? 16, bottom: L?.pad ?? 16, gap: 12 * u }}>
+          <span className="rounded-lg bg-black/55 font-mono tracking-widest" style={{ padding: `${4 * u}px ${12 * u}px`, fontSize: 22 * u }}>
+            {t("host.roomShort", { code: code ?? "" })}
+          </span>
+          <FullscreenButton on={fullscreen} u={u} />
+        </div>
+      )}
+      {phase === "lobby" && (
+        <div className="absolute bottom-4 left-4 z-10">
+          <FullscreenButton on={fullscreen} u={1} />
+        </div>
       )}
 
       {phase === "results" && (
@@ -290,8 +381,33 @@ export default function HostApp() {
 
       {trackError && <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{trackError}</div>}
 
-      {showDebug && <DebugPanel host={host} players={lobby?.players ?? []} net={net.current} />}
+      {showDebug && (
+        <DebugPanel
+          host={host}
+          players={lobby?.players ?? []}
+          net={net.current}
+          style={racing && L ? { left: L.pad, top: L.minimap.y + L.minimap.h + L.pad } : { right: 12, bottom: 12 }}
+        />
+      )}
     </main>
+  );
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+function FullscreenButton({ on, u }: { on: boolean; u: number }) {
+  return (
+    <button
+      onClick={toggleFullscreen}
+      className="rounded-lg bg-black/55 font-bold"
+      style={{ padding: `${4 * u}px ${12 * u}px`, fontSize: 18 * u }}
+      aria-label={on ? t("host.exitFullscreen") : t("host.fullscreen")}
+    >
+      {on ? "⤡" : "⤢"} {on ? t("host.exitFullscreen") : t("host.fullscreen")} <span className="opacity-50">(F)</span>
+    </button>
   );
 }
 
@@ -314,13 +430,13 @@ function PlayerGrid({ players, vip }: { players: PlayerInfo[]; vip: string | nul
 }
 
 /** Press D to toggle. Shows the numbers the Phase 1 gate needs. Dev-facing, so not in strings/en.json. */
-function DebugPanel({ host, players, net }: { host: RaceHost; players: PlayerInfo[]; net: { inRate: number; outRate: number; ping: Map<string, number>; bots: number } }) {
+function DebugPanel({ host, players, net, style }: { host: RaceHost; players: PlayerInfo[]; net: { inRate: number; outRate: number; ping: Map<string, number>; bots: number }; style: React.CSSProperties }) {
   const p50 = percentile(host.stats, 50);
   const p95 = percentile(host.stats, 95);
   const fmt = (x: number | null | undefined) => (x == null ? "–" : `${Math.round(x)} ms`);
   const fps = Math.round(host.fps);
   return (
-    <div className="pointer-events-none absolute bottom-3 right-3 rounded-lg bg-black/60 p-3 font-mono text-xs leading-5">
+    <div className="pointer-events-none absolute rounded-lg bg-black/60 p-3 font-mono text-xs leading-5" style={style}>
       <div>
         <span className={fps >= 58 ? "text-green-400" : fps >= 45 ? "text-yellow-300" : "text-red-400"}>{fps} fps</span> · msg/s in {net.inRate} · out {net.outRate}
         {net.bots > 0 && ` · ${net.bots} dev bots`}
@@ -336,7 +452,10 @@ function DebugPanel({ host, players, net }: { host: RaceHost; players: PlayerInf
           {!p.on && " (offline)"}
         </div>
       ))}
-      <div className="opacity-60">D to hide</div>
+      <div className="opacity-60">
+        camera: {host.camera.kind}
+        {host.camera.slowmo && " (slow-mo)"} · D hide · T test trap cut
+      </div>
     </div>
   );
 }

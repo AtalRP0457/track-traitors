@@ -230,7 +230,7 @@ Broadcast camera (instead of showing the whole map)
 - Zoom limits: never closer than about 3 car-lengths across the screen's short side, never further than the whole track. All changes smoothed (lerp), never jerky.
 - Leader bias: center pulled slightly ahead of the leader so players see what's coming.
 - If one car falls very far behind, keep the leading group in frame and show the straggler in a small corner window instead of zooming all the way out.
-- Trap-hit cut: YES. When a trap triggers, zoom toward the crash for ~1.5 s with 0.5x slow motion on the host display only (physics keeps running normally), then return to the pack. Max one cut every 5 s.
+- Trap-hit cut: YES. When a trap triggers, zoom toward the crash for ~1.5 s with 0.5x slow motion on the host display only (physics keeps running normally), then return to the pack. Max one cut every 5 s. **After the cut, jump straight back to live** (decided 2026-11-21) — no fast-forward; the replay is drawn from the last 3 s of recorded poses.
 - Race start: brief wide shot of the whole track, then zoom to the starting grid for the countdown.
 - Finish: zoom on the finish line for a photo finish.
 - A minimap in a corner always shows the full track and all cars.
@@ -239,6 +239,12 @@ Rest of the screen
 - Right edge: live positions tower. Top center: event banners (trap hits, laps). Bottom left: room code. Bottom right: "traps still hidden" counter. A corner: minimap. Phone reactions float up from the bottom.
 
 Performance: camera math runs once per frame on the host only; no extra network messages; must hold 60 fps.
+
+**Built (2026-11-21):** `game/camera.ts` (pure math + Director, unit-tested), `game/hud.ts` (shared layout), `game/scene.ts` (three Phaser cameras: broadcast, minimap from the track's minimap image, straggler window). Details settled while testing:
+- Shots are framed inside the screen area the positions tower leaves free; the view may run past the map edge only under the tower.
+- A car goes to the straggler window only when framing everyone would need ~the whole-track zoom (1.15×), and the window shows only while that car is really off screen.
+- The track background is rasterized at 2× so close-ups stay sharp.
+- Dev: key **T** on the host fakes a trap hit on the leader (until real traps exist). The "traps still hidden" counter appears with traps.
 
 Later (Phase 4): tilted 2.5D/3D host camera, and a pseudo-3D "behind your car" view on phones made by tilting the track image into perspective (Mode 7 style).
 

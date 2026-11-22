@@ -20,6 +20,18 @@ function setup() {
 }
 
 describe("RaceHost", () => {
+  it("records poses so the host can replay the last moments in slow motion", () => {
+    const { host } = setup();
+    host.start();
+    host.update(3100);
+    for (let i = 0; i < 120; i++) host.update(1000 / 60);
+    const t = Math.floor(host.renderTick) - 30;
+    const a = host.poseAt("a", t)!, b = host.poseAt("a", t + 1)!, mid = host.poseAt("a", t + 0.5)!;
+    expect(mid.x).toBeCloseTo((a.x + b.x) / 2, 6);
+    expect(host.poseAt("a", t + 1)).not.toEqual(host.pose("a")); // a recorded pose, not the live one
+    expect(host.poseAt("a", -100)).toEqual(host.pose("a")); // too old: falls back to live
+  });
+
   it("logs analytics for joins, disconnects and a whole match", () => {
     const { host, lobby, events } = setup();
     expect(events.filter((e) => e.e === "player_joined")).toHaveLength(2);

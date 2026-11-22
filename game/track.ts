@@ -63,6 +63,17 @@ export function buildTrack(def: TrackFile): Track {
   };
 }
 
+/** World rect covering the road (with curbs): what "the whole track" means for the camera. */
+export function trackBounds(t: Track): { x0: number; y0: number; x1: number; y1: number } {
+  const m = t.def.width / 2 + 40;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < t.xs.length; i++) {
+    x0 = Math.min(x0, t.xs[i]); y0 = Math.min(y0, t.ys[i]);
+    x1 = Math.max(x1, t.xs[i]); y1 = Math.max(y1, t.ys[i]);
+  }
+  return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
+}
+
 /** Distance along the centerline of a centerline point index. */
 export function indexDist(t: Track, i: number): number {
   return t.ds[i * SAMPLES_PER_SEGMENT];

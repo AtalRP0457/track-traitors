@@ -3,16 +3,32 @@
 
 export type Vec = [number, number];
 
+/** Ground on top of the road: sand (a bit slower), water (shallow, slow), ash (low grip). */
+export type SurfaceKind = "sand" | "water" | "ash";
+export const SURFACE_KINDS: SurfaceKind[] = ["sand", "water", "ash"];
+
 export interface Surface {
-  kind: "sand" | "water";
+  kind: SurfaceKind;
   poly: Vec[];
 }
 
-/** Track-specific hazards (bridge, lava with period, ...). Shape depends on kind; used from Phase 2. */
+/**
+ * Track-specific hazards. Shape depends on kind (all indexes are centerline point indexes):
+ *   bridge    {from, to, width}                one-car bridge; off it = splash
+ *   crossing  {x, y}                           figure-8 crossing (drawing only)
+ *   walls     {}                               road edges are walls: nobody can leave the road
+ *   shortcut  {from, to, width, path: Vec[]}   narrow side path from centerline[from] to [to] (hollow log)
+ *   lava      {at, len, period, open, offset}  crack across the road, open `open` of every `period` ticks
+ *   crabs     {at, period, cross, offset}      crab crowd walks across the road in `cross` of every `period` ticks
+ */
 export interface Hazard {
   kind: string;
   [k: string]: unknown;
 }
+
+/** Look of the generated background art. */
+export type Theme = "beach" | "harbor" | "lagoon" | "jungle" | "volcano" | "night" | "sandcastle";
+export const THEMES: Theme[] = ["beach", "harbor", "lagoon", "jungle", "volcano", "night", "sandcastle"];
 
 export interface TrackFile {
   id: string;
@@ -37,10 +53,22 @@ export interface TrackFile {
   /** Pre-made image paths, relative to public/. */
   background: string;
   minimap: string;
+  /** Art style for the generated background (default "beach"). */
+  theme?: Theme;
+  /** Difficulty label shown in the host's track picker. */
+  difficulty?: "easy" | "medium" | "hard";
+  /** Set at load time on Mirror versions (flipped left↔right). Never stored in a file. */
+  mirror?: boolean;
 }
 
 export const TRACK_DIR = "/assets/tracks";
-export const trackUrl = (id: string) => `${TRACK_DIR}/${id}.json`;
+export const trackUrl = (id: string) => `${TRACK_DIR}/${baseTrackId(id)}.json`;
+
+/** Mirror versions are "<id>~m": same file, flipped left↔right at load time. */
+export const MIRROR_SUFFIX = "~m";
+export const isMirrorId = (id: string) => id.endsWith(MIRROR_SUFFIX);
+export const baseTrackId = (id: string) => (isMirrorId(id) ? id.slice(0, -MIRROR_SUFFIX.length) : id);
+export const mirrorId = (id: string) => baseTrackId(id) + MIRROR_SUFFIX;
 
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 const isVec = (x: unknown): x is Vec => Array.isArray(x) && x.length === 2 && x.every(isNum);
@@ -77,9 +105,11 @@ export function trackProblems(raw: unknown): string[] {
     out.push("startGrid: expected 8 × [x, y, angle]");
   }
 
-  if (!Array.isArray(t.surfaces) || !t.surfaces.every((s) => s && ["sand", "water"].includes(s.kind) && Array.isArray(s.poly) && s.poly.length >= 3 && s.poly.every(isVec))) {
-    out.push("surfaces: expected [{kind: sand|water, poly: [[x, y], ≥3]}]");
+  if (!Array.isArray(t.surfaces) || !t.surfaces.every((s) => s && SURFACE_KINDS.includes(s.kind) && Array.isArray(s.poly) && s.poly.length >= 3 && s.poly.every(isVec))) {
+    out.push("surfaces: expected [{kind: sand|water|ash, poly: [[x, y], ≥3]}]");
   }
+  if (t.theme !== undefined && !THEMES.includes(t.theme as Theme)) out.push(`theme: expected one of ${THEMES.join(", ")}`);
+  if (t.mirror !== undefined) out.push("mirror: set at load time only, never in a file");
   if (!Array.isArray(t.hazards) || !t.hazards.every((h) => h && typeof h.kind === "string")) out.push("hazards: expected [{kind, ...}]");
 
   const zones = t.trapZones;
@@ -95,4 +125,34 @@ export function parseTrack(raw: unknown): TrackFile {
   const problems = trackProblems(raw);
   if (problems.length) throw new Error(`Bad track file: ${problems.join("; ")}`);
   return raw as TrackFile;
+}
+
+/** Flip a track left↔right (x → w − x). Driving order stays, so the loop runs the other way round. */
+export function mirrorTrack(def: TrackFile): TrackFile {
+  const w = def.world.w;
+  const fx = ([x, y]: Vec): Vec => [Math.round((w - x) * 10) / 10, y];
+  const hazards = def.hazards.map((h) => {
+    const out: Hazard = { ...h };
+    if (typeof h.x === "number") out.x = w - h.x;
+    if (Array.isArray(h.path)) out.path = (h.path as Vec[]).map(fx);
+    return out;
+  });
+  return {
+    ...def,
+    id: mirrorId(def.id),
+    mirror: true,
+    centerline: def.centerline.map(fx),
+    startGrid: def.startGrid.map(([x, y, a]) => [w - x, y, Math.atan2(Math.sin(Math.PI - a), Math.cos(Math.PI - a))]),
+    surfaces: def.surfaces.map((s) => ({ ...s, poly: s.poly.map(fx) })),
+    hazards,
+    racingLine: def.racingLine.map(fx),
+  };
+}
+
+/** Fetch a track by id (a Mirror id loads the base file and flips it). Browser and tests. */
+export async function fetchTrackFile(id: string, fetchFn: typeof fetch = fetch): Promise<TrackFile> {
+  const res = await fetchFn(trackUrl(id));
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const def = parseTrack(await res.json());
+  return isMirrorId(id) ? mirrorTrack(def) : def;
 }

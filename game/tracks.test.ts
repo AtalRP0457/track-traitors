@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { trackProblems } from "../shared/track-format";
+import { mirrorTrack, trackProblems } from "../shared/track-format";
 import { botSteer, newBrain } from "./bot";
 import { createRace, step, TUNING } from "./sim";
 import { publicFileExists, readTrackFile, readTrackRaw, trackIds } from "./test-tracks";
@@ -41,6 +41,24 @@ describe.each(trackIds())("track %s", (id) => {
     const t = buildTrack(readTrackFile(id));
     const pids = ["a", "b", "c", "d", "e", "f", "g", "h"];
     const r = createRace(t, pids, 2);
+    const brains = pids.map((_, i) => newBrain(0.4 + i * 0.08));
+    for (let i = 0; i < 60 * 180 && r.cars.some((c) => c.finishMs === null); i++) {
+      r.cars.forEach((c, k) => (c.steer = botSteer(t, brains[k], c.x, c.y, c.a)));
+      step(r);
+    }
+    expect(r.cars.every((c) => c.finishMs !== null)).toBe(true);
+  });
+
+  it("Mirror version is valid, gridded on the road and finishable by bots", () => {
+    const def = mirrorTrack(readTrackFile(id));
+    expect(def.id).toBe(`${id}~m`);
+    const t = buildTrack(def);
+    const pids = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const r = createRace(t, pids, 2);
+    for (const c of r.cars) {
+      expect(c.dist).toBeLessThan(0);
+      expect(project(t, c.x, c.y).off).toBeLessThan(t.def.width / 2);
+    }
     const brains = pids.map((_, i) => newBrain(0.4 + i * 0.08));
     for (let i = 0; i < 60 * 180 && r.cars.some((c) => c.finishMs === null); i++) {
       r.cars.forEach((c, k) => (c.steer = botSteer(t, brains[k], c.x, c.y, c.a)));

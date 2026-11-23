@@ -30,6 +30,7 @@ export function createGame(parent: HTMLElement, host: RaceHost, director: Direct
     backgroundColor: WATER,
     scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
     banner: false,
+    audio: { noAudio: true }, // our own Web Audio sounds (game/sound.ts)
     scene: new RaceScene(host, director),
   });
 }

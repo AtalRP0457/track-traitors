@@ -214,3 +214,23 @@ describe("RaceHost basics", () => {
     expect(percentile([10, 20, 30, 40], 95)).toBe(40);
   });
 });
+
+describe("My screen snapshots", () => {
+  it("are sent only while someone watches, at about 15 per second", () => {
+    const { host, out } = setup();
+    toRace(host);
+    const count = () => out.filter((m) => m.t === "snap").length;
+    for (let i = 0; i < 60; i++) host.update(FRAME);
+    expect(count()).toBe(0); // nobody has My screen on
+    host.onViewers(1);
+    for (let i = 0; i < 60; i++) host.update(FRAME);
+    expect(count()).toBeGreaterThanOrEqual(14);
+    expect(count()).toBeLessThanOrEqual(16);
+    const first = out.find((m) => m.t === "snap") as { c: number[]; ids?: string[] };
+    expect(first.ids?.length).toBe(first.c.length / 3);
+    host.onViewers(0);
+    const before = count();
+    for (let i = 0; i < 60; i++) host.update(FRAME);
+    expect(count()).toBe(before);
+  });
+});

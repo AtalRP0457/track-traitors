@@ -37,6 +37,8 @@ interface Player {
   placed: [Card, number, number][];
   glitchUsed: boolean;
   lastReact: number;
+  /** My screen is on (gets snapshots). */
+  view: boolean;
 }
 
 type ConnRole = { kind: "host" } | { kind: "phone"; pid: string | null };
@@ -90,6 +92,7 @@ export class RoomCore {
     const p = role.pid ? this.players.get(role.pid) : undefined;
     if (!p || p.conn !== connId) return;
     p.conn = null;
+    this.sendViewers();
     this.io.setTimer(`seat:${p.pid}`, SEAT_HOLD_MS, () => {
       this.players.delete(p.pid);
       this.sendLobby();
@@ -117,11 +120,13 @@ export class RoomCore {
         if (this.host.conn && this.host.conn !== connId) this.io.close(this.host.conn);
         this.host.conn = connId;
         this.io.clearTimer("host");
+        this.lastViewers = -1; // tell the rejoined host again
       } else {
         this.io.send(connId, { v: 1, t: "error", code: "taken", msg: text("error.taken") });
         return;
       }
       this.sendLobby();
+      this.sendViewers();
       return;
     }
     if (this.host?.conn !== connId) return; // ignore anything from a stale or rejected host
@@ -164,6 +169,17 @@ export class RoomCore {
           this.addScore(trap.owner, SCORE.trapCrash);
           this.sendScores();
         }
+        this.toPlayer(car, { v: 1, t: "bonk", kind: trap.card }); // the hit car's phone plays a little animation
+        break;
+      }
+      case "bonk":
+        if (typeof m.kind === "string" && m.kind.length < 16) this.toPlayer(String(m.p), { v: 1, t: "bonk", kind: m.kind });
+        break;
+      case "snap": {
+        // Only to phones with My screen on. Never stored.
+        if (!Array.isArray(m.c) || m.c.length > 8 * 3) return;
+        const snap = { v: 1, t: "snap", k: Number(m.k) || 0, c: m.c as number[], ids: Array.isArray(m.ids) ? (m.ids as string[]).slice(0, 8) : undefined } as const;
+        for (const p of this.players.values()) if (p.view && p.conn) this.io.send(p.conn, snap);
         break;
       }
       case "voteend":
@@ -363,6 +379,10 @@ export class RoomCore {
         this.sendProgress();
         break;
       }
+      case "view":
+        p.view = m.on === true;
+        this.sendViewers();
+        break;
       case "react": {
         const e = Number(m.e);
         const now = this.now();
@@ -397,6 +417,7 @@ export class RoomCore {
       if (this.phase === "draft") this.sendDraft(existing, 0, this.phaseInfo.track ?? "");
       if (this.phase === "race") this.io.send(connId, { v: 1, t: "lap", p: existing.pid, lap: existing.lap, laps: this.laps });
       this.sendLobby();
+      this.sendViewers();
       return;
     }
 
@@ -420,7 +441,7 @@ export class RoomCore {
 
     const p: Player = {
       pid: "p" + this.io.randomId(), seat: this.io.randomId() + this.io.randomId(), name, color, conn: connId, lap: 0,
-      role: null, hand: [], placed: [], glitchUsed: false, lastReact: -Infinity,
+      role: null, hand: [], placed: [], glitchUsed: false, lastReact: -Infinity, view: false,
     };
     this.players.set(p.pid, p);
     role.pid = p.pid;
@@ -429,6 +450,15 @@ export class RoomCore {
   }
 
   // ---------- helpers ----------
+
+  private lastViewers = 0;
+  /** Tell the host how many phones watch My screen, only when the number changes. */
+  private sendViewers() {
+    const n = [...this.players.values()].filter((p) => p.view && p.conn).length;
+    if (n === this.lastViewers || !this.host?.conn) return;
+    this.lastViewers = n;
+    this.toHost({ v: 1, t: "viewers", n });
+  }
 
   private vip(): string | null {
     return this.players.keys().next().value ?? null;

@@ -117,6 +117,9 @@ export default function HostApp() {
         case "start":
           host.start();
           break;
+        case "viewers":
+          host.onViewers(Number(m.n));
+          break;
         case "progress":
           host.onProgress(Number(m.n), Number(m.of));
           break;

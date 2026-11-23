@@ -42,7 +42,10 @@ export interface VoteMsg { v: 1; t: "vote"; who: string }
 /** Reaction emoji, index into REACTIONS. */
 export interface ReactMsg { v: 1; t: "react"; e: number }
 
-export type PhoneToRoom = JoinMsg | InputMsg | PingMsg | StartReqMsg | StatMsg | PlaceMsg | GlitchReqMsg | VoteMsg | ReactMsg;
+/** My screen on/off. The host sends snapshots only while at least one phone has it on. */
+export interface ViewMsg { v: 1; t: "view"; on: boolean }
+
+export type PhoneToRoom = JoinMsg | InputMsg | PingMsg | StartReqMsg | StatMsg | PlaceMsg | GlitchReqMsg | VoteMsg | ReactMsg | ViewMsg;
 
 // ---------- host → room ----------
 
@@ -66,7 +69,15 @@ export interface HitMsg { v: 1; t: "hit"; trap: number; car: string }
 /** Host closes the vote; the room tallies it. */
 export interface VoteEndMsg { v: 1; t: "voteend" }
 
-export type HostToRoom = HostHelloMsg | PhaseMsg | PongMsg | AckMsg | LapMsg | ResultMsg | MatchMsg | HitMsg | VoteEndMsg;
+/**
+ * Car snapshot for My screen (15/s, only while someone watches): c = flat [x, y, angle×100] ints per
+ * car. ids (the car order) is included when it changes and every 2 s, for phones that just turned it on.
+ */
+export interface SnapMsg { v: 1; t: "snap"; k: number; c: number[]; ids?: string[] }
+/** A track hazard (lava, crabs) got this car: its phone plays a local animation. */
+export interface BonkMsg { v: 1; t: "bonk"; p?: string; kind: string }
+
+export type HostToRoom = HostHelloMsg | PhaseMsg | PongMsg | AckMsg | LapMsg | ResultMsg | MatchMsg | HitMsg | VoteEndMsg | SnapMsg | BonkMsg;
 
 // ---------- room → host ----------
 
@@ -90,7 +101,10 @@ export interface ScoresMsg { v: 1; t: "scores"; scores: Record<string, number> }
 /** End of match: everyone learns who the traitors were. */
 export interface RevealMsg { v: 1; t: "reveal"; traitors: string[] }
 
-export type RoomToHost = LobbyMsg | FwdInputMsg | FwdPingMsg | StartMsg | FwdStatMsg | ErrorMsg | ProgressMsg | TrapsMsg | FwdGlitchMsg | FwdReactMsg | VoteResultMsg | ScoresMsg | RevealMsg;
+/** How many phones have My screen on right now. 0 = send no snapshots. */
+export interface ViewersMsg { v: 1; t: "viewers"; n: number }
+
+export type RoomToHost = ViewersMsg | LobbyMsg | FwdInputMsg | FwdPingMsg | StartMsg | FwdStatMsg | ErrorMsg | ProgressMsg | TrapsMsg | FwdGlitchMsg | FwdReactMsg | VoteResultMsg | ScoresMsg | RevealMsg;
 
 // ---------- room → phone ----------
 
@@ -112,7 +126,7 @@ export interface SeatsMsg { v: 1; t: "seats"; bots: BotInfo[] }
 
 export type RoomToPhone =
   | WelcomeMsg | LobbyMsg | PhaseMsg | PongMsg | AckMsg | LapMsg | ResultMsg | ErrorMsg
-  | RoleMsg | DraftMsg | MyTrapsMsg | GlitchedMsg | GlitchOkMsg | VoteResultMsg | ScoresMsg | RevealMsg | ProgressMsg | SeatsMsg;
+  | RoleMsg | DraftMsg | MyTrapsMsg | GlitchedMsg | GlitchOkMsg | VoteResultMsg | ScoresMsg | RevealMsg | ProgressMsg | SeatsMsg | SnapMsg | BonkMsg;
 
 export type AnyMsg = PhoneToRoom | HostToRoom | RoomToHost | RoomToPhone;
 

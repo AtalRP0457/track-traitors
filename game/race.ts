@@ -29,6 +29,9 @@ const STAT_WINDOW = 200;
 const VOTE_RESULT_WAIT_MS = 3000;
 /** Static flash on the TV when someone is glitched. */
 const GLITCH_FLASH_TICKS = 24;
+/** My screen snapshots: 15 per second, ids re-sent every 2 s. */
+const SNAP_MS = 1000 / 15;
+const SNAP_IDS_EVERY = 30;
 
 export interface Pose { x: number; y: number; a: number }
 export interface Reaction { id: number; e: number; pid: string; atMs: number }
@@ -96,6 +99,11 @@ export class RaceHost {
   afterTick?: () => void;
   /** Called when a harmful trap goes off at (x, y): the scene cuts the camera there. */
   onTrapCut?: (x: number, y: number) => void;
+  /** Phones with My screen on (from the room). 0 = send no snapshots. */
+  viewers = 0;
+  private snapAcc = 0;
+  private snapK = 0;
+  private snapIds = "";
   /** Sound effects on the big screen. */
   sound?: (s: SoundName) => void;
   private lastBeep = 0;
@@ -157,6 +165,10 @@ export class RaceHost {
     if (this.stats.length > STAT_WINDOW) this.stats.shift();
     if (this.phase === "race") this.stat.stats.push(tt);
     this.lastStat.set(p, tt);
+  }
+
+  onViewers(n: number) {
+    this.viewers = Math.max(0, n | 0);
   }
 
   onProgress(n: number, of: number) {
@@ -352,6 +364,7 @@ export class RaceHost {
   /** Called every rendered frame with the frame time in ms. Runs fixed 60 Hz physics steps. */
   update(deltaMs: number) {
     this.countFps(deltaMs);
+    this.maybeSnap(deltaMs);
     if (this.phase !== "race") {
       if (["role", "draft", "countdown", "results", "vote", "reveal"].includes(this.phase)) {
         this.phaseLeft -= deltaMs;
@@ -374,6 +387,25 @@ export class RaceHost {
       this.tick();
       if (this.phase !== "race") return;
     }
+  }
+
+  /** Car snapshot for phones with My screen on: only while racing and only if someone watches. */
+  private maybeSnap(deltaMs: number) {
+    const r = this.race;
+    if (this.viewers === 0 || !r || (this.phase !== "race" && this.phase !== "countdown")) {
+      this.snapAcc = 0;
+      return;
+    }
+    this.snapAcc += deltaMs;
+    if (this.snapAcc < SNAP_MS) return;
+    this.snapAcc %= SNAP_MS;
+    const c: number[] = [];
+    for (const car of r.cars) c.push(Math.round(car.x), Math.round(car.y), Math.round(car.a * 100));
+    const ids = r.cars.map((x) => x.pid);
+    const key = ids.join(",");
+    const withIds = key !== this.snapIds || this.snapK % SNAP_IDS_EVERY === 0;
+    this.snapIds = key;
+    this.send({ v: 1, t: "snap", k: ++this.snapK, c, ids: withIds ? ids : undefined });
   }
 
   /** Back-compat for the HUD and camera: time left in the countdown. */
@@ -425,6 +457,7 @@ export class RaceHost {
     for (const h of r.hazardHits) {
       this.banner = { key: h.kind === "lava" ? "hit.lava" : "hit.crabs", vars: { name: this.name(h.pid) }, tick: r.tick };
       this.sound?.(h.kind);
+      this.send({ v: 1, t: "bonk", p: h.pid, kind: h.kind });
     }
 
     // A respawned car jumps; don't draw it gliding across the map.

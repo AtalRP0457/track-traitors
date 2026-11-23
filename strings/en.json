@@ -154,5 +154,8 @@
   "hit.lava": "🌋 LAVA! {name} got scorched!",
   "hit.crabs": "🦀 CRAB CROSSING! {name} got stuck in the crowd!",
   "host.soundOn": "Sound on",
-  "host.soundOff": "Sound off"
+  "host.soundOff": "Sound off",
+  "phone.myScreen": "My screen",
+  "phone.myScreenOn": "On",
+  "phone.myScreenOff": "Off"
 }

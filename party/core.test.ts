@@ -74,6 +74,27 @@ describe("RoomCore", () => {
     expect(a.name).not.toBe("anything goes");
   });
 
+  it("My screen: host learns the viewer count; snapshots go only to phones that watch", () => {
+    joinPhone("A");
+    joinPhone("B");
+    expect(r.last("H", "viewers")).toBeUndefined(); // nobody watching: nothing sent
+    r.msg("A", { t: "view", on: true });
+    expect(r.last("H", "viewers")).toEqual({ v: 1, t: "viewers", n: 1 });
+    r.msg("H", { t: "snap", k: 1, c: [1, 2, 3], ids: ["x"] });
+    expect(r.last("A", "snap")).toMatchObject({ c: [1, 2, 3], ids: ["x"] });
+    expect(r.last("B", "snap")).toBeUndefined();
+    r.room.disconnect("A");
+    expect(r.last("H", "viewers")).toEqual({ v: 1, t: "viewers", n: 0 });
+  });
+
+  it("a trap hit makes only that car's phone play its bonk animation", () => {
+    const a = joinPhone("A");
+    joinPhone("B");
+    r.msg("H", { t: "bonk", p: a.pid, kind: "lava" });
+    expect(r.last("A", "bonk")).toEqual({ v: 1, t: "bonk", kind: "lava" });
+    expect(r.last("B", "bonk")).toBeUndefined();
+  });
+
   it("forwards input to the host with the sender pid", () => {
     const a = joinPhone("A");
     r.msg("A", { t: "in", s: -1, b: 0, g: 0, k: 7 });

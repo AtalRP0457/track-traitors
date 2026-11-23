@@ -11,10 +11,14 @@ import { parseMsg, type AnyMsg, type BotInfo, type Clue, type ErrorMsg, type Lob
 import type { Card } from "@/shared/rules";
 import type { PartySocket } from "partysocket";
 import Controls from "./Controls";
+import MyScreen, { SnapStore } from "./MyScreen";
 import { Draft, GlitchPicker, Reactions, RoleCard, Tap, Vote, type Seat as SeatInfo } from "./MatchScreens";
 
 type Seat = { pid: string; seat: string; name: string; color: string };
 const seatKey = (code: string) => `tt-seat-${code}`;
+const MY_SCREEN_KEY = "tt-myscreen";
+/** Local crash animation word per trap card / hazard (nothing streamed). */
+const BONK: Record<string, string> = { oil: "SPLAT!", crab: "PINCH!", coconut: "BONK!", fake: "FIZZLE…", boost: "ZOOM!", ramp: "WHEE!", lava: "HOT HOT!", crabs: "CRABS!" };
 
 export default function PhoneApp() {
   const [code, setCode] = useState("");
@@ -47,6 +51,12 @@ export default function PhoneApp() {
   const [glitchedUntil, setGlitchedUntil] = useState(0);
   const [glitchUsed, setGlitchUsed] = useState(false);
   const [picking, setPicking] = useState(false);
+  // My screen: off by default; remembered per phone.
+  const [myScreen, setMyScreen] = useState(false);
+  const [trackId, setTrackId] = useState("");
+  const [bonk, setBonk] = useState<{ kind: string; at: number } | null>(null);
+  const [visible, setVisible] = useState(true);
+  const snaps = useRef(new SnapStore()).current;
   const wsRef = useRef<PartySocket | null>(null);
   // Dev: ?lag=&jitter=&loss= on the /play URL simulates a bad network on this phone.
   const sim = useRef<NetSim | null>(null);
@@ -118,7 +128,9 @@ export default function PhoneApp() {
           if (ph === "vote") setVoted(null);
           if (ph === "race") setGlitchUsed(false);
           if (ph !== "race") setPicking(false);
+          if (typeof m.track === "string") setTrackId(m.track);
           if (ph === "countdown") {
+            snaps.clear();
             setCountdownEnd(performance.now() + Number(m.ms ?? 0));
             setLap(0);
             setResult(null);
@@ -162,6 +174,13 @@ export default function PhoneApp() {
           break;
         case "result":
           setResult(m as unknown as ResultMsg);
+          break;
+        case "snap":
+          if (Array.isArray(m.c)) snaps.push(m.c as number[], Array.isArray(m.ids) ? (m.ids as string[]) : undefined);
+          break;
+        case "bonk":
+          setBonk({ kind: String(m.kind), at: performance.now() });
+          navigator.vibrate?.([40, 30, 80]);
           break;
         case "pong": {
           const sent = pings.current.get(Number(m.k));
@@ -220,6 +239,26 @@ export default function PhoneApp() {
 
   // Keep the screen awake while racing.
   const racing = phase === "countdown" || phase === "race";
+
+  useEffect(() => {
+    setMyScreen(store.get<boolean>(MY_SCREEN_KEY) === true);
+    const onVis = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  // Ask for snapshots only while My screen is on, we're racing and the page is visible.
+  const watching = myScreen && racing && visible && connected;
+  useEffect(() => {
+    if (!connected || !me) return;
+    tx({ v: 1, t: "view", on: watching });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, connected, me?.pid]);
+  const toggleScreen = () => {
+    const on = !myScreen;
+    setMyScreen(on);
+    store.set(MY_SCREEN_KEY, on);
+    navigator.vibrate?.(8);
+  };
   useEffect(() => {
     if (!racing || !("wakeLock" in navigator)) return;
     let lock: WakeLockSentinel | null = null;
@@ -344,12 +383,14 @@ export default function PhoneApp() {
   const myScore = scores[me.pid];
   /** Same number as on my car and the TV's positions tower (seat order: phones, then bots). */
   const carNo = lobby.players.findIndex((p) => p.pid === me.pid) + 1;
+  const carInfo = new Map([...lobby.players, ...bots].map((p, i) => [p.pid, { color: p.color, n: i + 1 }]));
 
   if (inRace) {
     const left = Math.max(0, Math.ceil((countdownEnd - performance.now()) / 1000));
     const glitched = performance.now() < glitchedUntil;
     return (
       <main className="controller">
+        {watching && trackId && <MyScreen trackId={trackId} me={me.pid} store={snaps} cars={carInfo} />}
         <Controls color={me.color} onSteer={steer} bottom={traitor ? 88 : 0} />
         {traitor && (
           <div className="absolute inset-x-2 bottom-2 flex h-20">
@@ -379,8 +420,18 @@ export default function PhoneApp() {
             {me.name}
           </span>
           <span>{lap >= LAPS ? t("race.finished") : t("race.lap", { lap: Math.min(lap + 1, LAPS), laps: LAPS })}</span>
-          {status}
+          <span className="flex items-center gap-3">
+            <Tap onTap={toggleScreen} className="pointer-events-auto rounded-full px-3 py-1 text-sm font-bold" style={{ background: myScreen ? "var(--racer)" : "rgba(255,255,255,0.15)", color: myScreen ? "black" : undefined }} label={t("phone.myScreen")}>
+              📺 {t(myScreen ? "phone.myScreenOn" : "phone.myScreenOff")}
+            </Tap>
+            {status}
+          </span>
         </div>
+        {bonk && performance.now() - bonk.at < 1000 && (
+          <div key={bonk.at} className="bonk pointer-events-none absolute inset-x-0 top-1/4 text-center text-7xl font-black" style={{ color: "var(--traitor)" }}>
+            {BONK[bonk.kind] ?? "BONK!"}
+          </div>
+        )}
         {phase === "countdown" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-9xl font-black">{left || t("race.go")}</div>
         )}

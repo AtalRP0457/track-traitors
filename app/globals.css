@@ -60,3 +60,14 @@ body {
   from { stroke-opacity: 0.45; }
   to { stroke-opacity: 0.95; }
 }
+
+/* Phone: local crash word pops up and fades (no network, PLAN.md 5). */
+.bonk {
+  animation: bonk-pop 0.9s ease-out forwards;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.5);
+}
+@keyframes bonk-pop {
+  from { transform: scale(0.4) rotate(-8deg); opacity: 0; }
+  15% { transform: scale(1.15) rotate(3deg); opacity: 1; }
+  to { transform: scale(1) rotate(0); opacity: 0; }
+}

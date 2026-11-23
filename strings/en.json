@@ -57,7 +57,6 @@
   "banner.wins": "🏁 {name} wins!",
   "host.fullscreen": "Fullscreen",
   "host.exitFullscreen": "Exit fullscreen",
-  "host.farBehind": "{name} · far behind",
   "host.slowmo": "Replay ×0.5",
   "host.roomShort": "Room {code}"
 }

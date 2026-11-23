@@ -237,7 +237,6 @@ export default function HostApp() {
   const u = L?.u ?? 1;
   const racing = (phase === "race" || phase === "countdown") && host.race;
   const showBanner = host.banner && host.race && host.race.tick - host.banner.tick < 180;
-  const straggler = cam.straggler ? byPid.get(cam.straggler) : undefined;
 
   return (
     <main className="fixed inset-0 overflow-hidden" style={{ cursor: cursorHidden ? "none" : undefined }}>
@@ -287,18 +286,6 @@ export default function HostApp() {
         <>
           {/* Minimap frame (the map itself is a Phaser camera underneath). */}
           <div className="pointer-events-none absolute rounded-lg ring-2 ring-white/40" style={{ left: L.minimap.x, top: L.minimap.y, width: L.minimap.w, height: L.minimap.h }} />
-
-          {/* Straggler window frame + name. */}
-          {straggler && (
-            <div
-              className="pointer-events-none absolute rounded-lg ring-4"
-              style={{ left: L.straggler.x, top: L.straggler.y, width: L.straggler.w, height: L.straggler.h, boxShadow: `0 0 0 ${4 * u}px ${straggler.color}` }}
-            >
-              <div className="absolute -top-1 left-0 -translate-y-full rounded bg-black/60 px-2 font-bold" style={{ fontSize: 16 * u }}>
-                {t("host.farBehind", { name: straggler.name })}
-              </div>
-            </div>
-          )}
 
           {/* Positions tower, right edge. */}
           <ol className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 space-y-1 overflow-hidden rounded-l-2xl bg-black/55 font-bold" style={{ width: L.towerW, padding: 12 * u, fontSize: 22 * u }}>

@@ -1,7 +1,7 @@
 // Where things go on the host screen (PLAN.md 5b). Used by the Phaser scene (camera viewports)
 // and by React (frames, labels), so both agree at every window size.
 //   top-left: minimap · top-center: banners · right edge: positions tower
-//   bottom-left: room code (+ straggler window above it) · bottom-right: traps-hidden counter
+//   bottom-left: room code · bottom-right: traps-hidden counter
 
 export interface Box {
   x: number;
@@ -15,7 +15,6 @@ export interface HudLayout {
   u: number;
   pad: number;
   minimap: Box;
-  straggler: Box;
   /** Positions tower on the right edge: fixed width so the camera can frame around it. */
   towerW: number;
 }
@@ -23,7 +22,6 @@ export interface HudLayout {
 /** What the scene tells the React HUD each frame (React reads it on its own refresh). */
 export interface CameraInfo {
   kind: string;
-  straggler: string | null;
   slowmo: boolean;
   layout: HudLayout | null;
 }
@@ -34,14 +32,10 @@ export function hudLayout(w: number, h: number, aspect: number): HudLayout {
   const pad = Math.round(16 * u);
   const mmW = Math.round(Math.min(w * 0.2, 340 * u));
   const mmH = Math.round(mmW * aspect);
-  const codeH = Math.round(64 * u);
-  const sw = Math.round(Math.min(w * 0.24, 380 * u));
-  const sh = Math.round((sw * 9) / 16);
   return {
     u,
     pad,
     minimap: { x: pad, y: pad, w: mmW, h: mmH },
-    straggler: { x: pad, y: h - pad - codeH - pad - sh, w: sw, h: sh },
     towerW: Math.round(290 * u),
   };
 }

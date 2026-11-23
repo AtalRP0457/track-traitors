@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAM, clampToWorld, Director, follow, packShot, zoomLimits, type CarPos, type DirectorInput, type Rect, type Shot, type View } from "./camera";
+import { CAM, clampToWorld, contain, Director, follow, packShot, zoomLimits, type CarPos, type DirectorInput, type Rect, type Shot, type View } from "./camera";
 
 const track: Rect = { x0: 0, y0: 0, x1: 1600, y1: 900 };
 const view: View = { w: 1920, h: 1080 };
@@ -24,30 +24,73 @@ describe("zoom limits", () => {
 describe("pack shot", () => {
   it("keeps every car in frame with a margin", () => {
     const cars = [car("a", 600, 300, 900), car("b", 500, 350, 800), car("c", 450, 420, 700)];
-    const { shot, straggler } = packShot(cars, view, track);
-    expect(straggler).toBeNull();
+    const shot = packShot(cars, view, track);
     const r = visible(shot);
     for (const c of cars) expect(inside(pad(r, -CAM.padPx / 2), c.x, c.y)).toBe(true);
   });
 
   it("pulls the center ahead of the leader", () => {
     const cars = [car("a", 600, 400, 900, 0), car("b", 560, 400, 860, 0)];
-    const { shot } = packShot(cars, view, track);
+    const shot = packShot(cars, view, track);
     expect(shot.cx).toBeGreaterThan(580); // pack middle is 580; leader drives +x
   });
 
   it("a lone car is not filmed from too close", () => {
-    const { shot } = packShot([car("a", 800, 450, 0)], view, track);
+    const shot = packShot([car("a", 800, 450, 0)], view, track);
     const r = visible(shot);
     expect(Math.min(r.x1 - r.x0, r.y1 - r.y0)).toBeGreaterThanOrEqual(CAM.packMinCars * CAM.carLen - 1);
   });
 
-  it("drops a far-behind car into the corner window instead of zooming all the way out", () => {
+  it("never leaves a far-behind car out: zooms out to keep everyone", () => {
     const cars = [car("a", 1400, 200, 3000), car("b", 1350, 250, 2950), car("slow", 150, 800, 100)];
-    const { shot, straggler } = packShot(cars, view, track);
-    expect(straggler).toBe("slow");
-    expect(inside(visible(shot), 1400, 200)).toBe(true);
-    expect(shot.zoom).toBeGreaterThan(zoomLimits(view, track).min);
+    const r = visible(packShot(cars, view, track));
+    for (const c of cars) expect(inside(r, c.x, c.y)).toBe(true);
+  });
+
+  it("zooms in more when the cars are close together", () => {
+    const near = packShot([car("a", 800, 450, 100), car("b", 760, 450, 60)], view, track);
+    const far = packShot([car("a", 1300, 450, 900), car("b", 300, 450, 60)], view, track);
+    expect(near.zoom).toBeGreaterThan(far.zoom);
+  });
+});
+
+describe("contain", () => {
+  it("pulls the shot out and over so a car the smoothing lagged behind is back on screen", () => {
+    const s = contain({ cx: 400, cy: 400, zoom: 3 }, [{ x: 400, y: 400 }, { x: 1500, y: 850 }], view, { l: 0, r: 300, t: 0, b: 0 }, 40);
+    const r = visible(s);
+    const freeX1 = r.x1 - 300 / s.zoom;
+    for (const [x, y] of [[400, 400], [1500, 850]]) {
+      expect(x).toBeGreaterThanOrEqual(r.x0);
+      expect(x).toBeLessThanOrEqual(freeX1);
+      expect(y).toBeGreaterThanOrEqual(r.y0);
+      expect(y).toBeLessThanOrEqual(r.y1);
+    }
+  });
+  it("leaves a shot alone when everyone is already in view", () => {
+    const s = { cx: 800, cy: 450, zoom: 1 };
+    expect(contain(s, [{ x: 800, y: 450 }], view, { l: 0, r: 0, t: 0, b: 0 }, 40)).toEqual(s);
+  });
+});
+
+describe("director keeps every racing car in frame", () => {
+  it("even when one car is far behind and the smoothing is mid-move", () => {
+    const d = new Director();
+    const world = { x0: 0, y0: 0, x1: 1600, y1: 900 };
+    const ins = { l: 0, r: 300, t: 0, b: 0 };
+    const mk = (ax: number): DirectorInput => ({ nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0, tick: 0,
+      cars: [car("a", ax, 200, 3000), car("slow", 150, 800, 100)], finishLine: { x: 0, y: 0 }, finishDist: 9e9, view, track, world, insets: ins });
+    d.update(mk(300));
+    for (let ax = 300; ax <= 1450; ax += 50) {
+      const out = d.update(mk(ax));
+      const r = visible(out.shot);
+      const freeX1 = r.x1 - ins.r / out.shot.zoom;
+      for (const [x, y] of [[ax, 200], [150, 800]]) {
+        expect(x).toBeGreaterThanOrEqual(r.x0 - 1e-6);
+        expect(x).toBeLessThanOrEqual(freeX1 + 1e-6);
+        expect(y).toBeGreaterThanOrEqual(r.y0 - 1e-6);
+        expect(y).toBeLessThanOrEqual(r.y1 + 1e-6);
+      }
+    }
   });
 });
 
@@ -119,7 +162,7 @@ describe("director", () => {
     expect(after.kind).toBe("pack");
     expect(after.slowmo).toBeNull();
     // Snapped, not eased: identical to the pack target.
-    expect(after.shot).toEqual(packShot(base({}).cars, view, track).shot); // (well inside the world, so unclamped)
+    expect(after.shot).toEqual(packShot(base({}).cars, view, track)); // (well inside the world, so unclamped)
     expect(d.trapHit(900, 300, 6100, 300)).toBe(true);
   });
 

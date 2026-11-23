@@ -78,6 +78,45 @@ describe("race sim", () => {
     expect(c.dist).toBeLessThan(0);
   });
 
+  it("a car off the road for 2 s respawns where it left, facing the driving direction", () => {
+    const r = createRace(track, ["a"], 2);
+    const c = r.cars[0];
+    for (let i = 0; i < 200; i++) (drive(r, c), step(r));
+    expect(c.offTicks).toBe(0);
+    const leftAt = c.dist;
+    // Shove it sideways off the road and point it away from the track.
+    const p = pointAt(track, c.dist);
+    c.x = p.x + Math.cos(p.a + Math.PI / 2) * 200;
+    c.y = p.y + Math.sin(p.a + Math.PI / 2) * 200;
+    c.a = p.a + Math.PI;
+    let back = -1;
+    for (let i = 1; i <= 200 && back < 0; i++) {
+      step(r);
+      if (r.respawned.includes("a")) back = i;
+    }
+    expect(back).toBeGreaterThanOrEqual(119);
+    expect(back).toBeLessThanOrEqual(121);
+    const q = pointAt(track, c.dist);
+    expect(Math.hypot(c.x - q.x, c.y - q.y)).toBeLessThan(1);
+    expect(Math.abs(c.dist - leftAt)).toBeLessThan(60);
+    expect(Math.abs(Math.atan2(Math.sin(c.a - q.a), Math.cos(c.a - q.a)))).toBeLessThan(0.05);
+    expect(c.v).toBe(0);
+  });
+
+  it("coming back onto the road within 2 s cancels the respawn", () => {
+    const r = createRace(track, ["a"], 2);
+    const c = r.cars[0];
+    for (let i = 0; i < 100; i++) (drive(r, c), step(r));
+    const p = pointAt(track, c.dist);
+    const x = c.x, y = c.y;
+    c.x = p.x + Math.cos(p.a + Math.PI / 2) * 200;
+    c.y = p.y + Math.sin(p.a + Math.PI / 2) * 200;
+    for (let i = 0; i < 100; i++) step(r);
+    c.x = x; c.y = y; c.seg = 0;
+    step(r);
+    expect(c.offTicks).toBe(0);
+  });
+
   it("ranks finishers by time, then the rest by distance", () => {
     const r = createRace(track, ["a", "b", "c"], 2);
     r.cars[0].dist = 100;

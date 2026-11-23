@@ -14,6 +14,10 @@ export const TUNING = {
   carRadius: 15,
   /** Progress jumps bigger than this in one tick are ignored, so cutting across the grass earns nothing. */
   maxStepProgress: 40,
+  /** Off the road this long → respawn where the car left it, facing the right way. */
+  respawnTicks: 120,
+  /** After a respawn the car can't be bumped for this long, so it isn't knocked straight back off. */
+  ghostTicks: 60,
 };
 
 export interface Car {
@@ -30,6 +34,12 @@ export interface Car {
   cp: number;
   lap: number;
   finishMs: number | null;
+  /** Ticks spent off the road in a row (0 = on the road). */
+  offTicks: number;
+  /** Progress (dist) at the moment the car left the road: where it respawns. */
+  offDist: number;
+  /** Ticks left of post-respawn ghosting (no collisions). */
+  ghost: number;
 }
 
 export interface RaceState {
@@ -37,6 +47,8 @@ export interface RaceState {
   laps: number;
   cars: Car[];
   tick: number;
+  /** Cars put back on the road this tick (for the host's "back on track" effect). */
+  respawned: string[];
 }
 
 export function createRace(track: Track, pids: string[], laps: number): RaceState {
@@ -46,9 +58,9 @@ export function createRace(track: Track, pids: string[], laps: number): RaceStat
     const p = project(track, x, y);
     // Grid slots sit behind the start line, so their distance is negative.
     const dist = p.s > L / 2 ? p.s - L : p.s;
-    return { pid, x, y, a, v: 0, steer: 0, dist, seg: p.i, cp: 0, lap: 0, finishMs: null } as Car;
+    return { pid, x, y, a, v: 0, steer: 0, dist, seg: p.i, cp: 0, lap: 0, finishMs: null, offTicks: 0, offDist: dist, ghost: 0 } as Car;
   });
-  return { track, laps, cars, tick: 0 };
+  return { track, laps, cars, tick: 0, respawned: [] };
 }
 
 /** Unwrapped distance of the k-th checkpoint in driving order. */
@@ -61,6 +73,21 @@ export function raceMs(r: RaceState): number {
   return Math.round((r.tick * 1000) / 60);
 }
 
+/** Put a car back on the centerline at progress `dist`, pointing along the track, stopped. */
+export function respawn(r: RaceState, c: Car, dist: number) {
+  const p = pointAt(r.track, dist);
+  c.x = p.x;
+  c.y = p.y;
+  c.a = p.a;
+  c.v = 0;
+  c.dist = dist;
+  c.seg = project(r.track, p.x, p.y).i;
+  c.offTicks = 0;
+  c.offDist = dist;
+  c.ghost = TUNING.ghostTicks;
+  r.respawned.push(c.pid);
+}
+
 /** Advance one fixed step. Returns pids that completed a lap this tick. */
 export function step(r: RaceState): string[] {
   const { track } = r;
@@ -68,6 +95,7 @@ export function step(r: RaceState): string[] {
   const half = track.def.width / 2;
   const lapped: string[] = [];
   r.tick++;
+  r.respawned = [];
 
   for (const c of r.cars) {
     const done = c.finishMs !== null;
@@ -100,6 +128,13 @@ export function step(r: RaceState): string[] {
     if (Math.abs(d) <= TUNING.maxStepProgress) c.dist += d;
     c.seg = np.i;
 
+    // Off the road: remember where it left; after 2 s put it back there, facing the right way.
+    if (c.ghost > 0) c.ghost--;
+    if (np.off > half + TUNING.carRadius) {
+      if (c.offTicks === 0) c.offDist = c.dist;
+      if (++c.offTicks >= TUNING.respawnTicks) respawn(r, c, c.offDist);
+    } else c.offTicks = 0;
+
     // Checkpoints only count in order; a lap is done when checkpoint 0 comes round again.
     while (c.dist >= cpDist(track, c.cp)) c.cp++;
 
@@ -129,6 +164,7 @@ function collide(cars: Car[]) {
   for (let i = 0; i < cars.length; i++) {
     for (let j = i + 1; j < cars.length; j++) {
       const a = cars[i], b = cars[j];
+      if (a.ghost > 0 || b.ghost > 0) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const d2 = dx * dx + dy * dy;
       if (d2 >= min * min || d2 === 0) continue;

@@ -39,9 +39,8 @@ export const CAM = {
   padPx: 110,
   /** Leader bias: frame includes a point this far ahead of the leader (≈ 0.7 s at top speed). */
   leadPx: 180,
-  /** Drop the last car into the corner window only when framing everyone would need nearly
-   *  the whole-track zoom ("instead of zooming all the way out"). */
-  stragglerAt: 1.15,
+  /** Margin (world px) the hard "everyone in frame" check keeps around each car. */
+  containPx: 45,
   /** Smoothing rates (per second) for position and zoom. Higher = snappier. */
   kPos: 2.5,
   kZoom: 2,
@@ -98,27 +97,46 @@ export function closeShot(x: number, y: number, cars: number, v: View, track: Re
 }
 
 /**
- * Frame the pack: all cars plus a point ahead of the leader, padded. If that needs zooming out
- * too far, cars at the back are left out; the last one left out goes to the corner window.
+ * Frame the pack: every car plus a point ahead of the leader, padded. Nobody is ever left out:
+ * if the cars are far apart the shot zooms out (up to the whole track) to keep them all in view.
  */
-export function packShot(cars: CarPos[], v: View, track: Rect, leaderBias = true): { shot: Shot; straggler: string | null } {
-  if (cars.length === 0) return { shot: wideShot(v, track), straggler: null };
-  const order = [...cars].sort((a, b) => b.dist - a.dist);
-  const lead = order[0];
+export function packShot(cars: CarPos[], v: View, track: Rect, leaderBias = true): Shot {
+  if (cars.length === 0) return wideShot(v, track);
+  const lead = cars.reduce((a, b) => (b.dist > a.dist ? b : a));
   const ahead = leaderBias ? [{ x: lead.x + Math.cos(lead.a) * CAM.leadPx, y: lead.y + Math.sin(lead.a) * CAM.leadPx }] : [];
-  const { min } = zoomLimits(v, track);
-  let straggler: string | null = null;
-  let n = order.length;
-  for (;;) {
-    const r = minSpan(pad(bbox([...order.slice(0, n), ...ahead]), CAM.padPx), CAM.packMinCars * CAM.carLen);
-    const z = fitZoom(r, v);
-    if (z < min * CAM.stragglerAt && n > 1) {
-      straggler ??= order[n - 1].pid;
-      n--;
-      continue;
-    }
-    return { shot: { cx: (r.x0 + r.x1) / 2, cy: (r.y0 + r.y1) / 2, zoom: clampZoom(z, v, track) }, straggler };
-  }
+  const cr = pad(bbox(cars), CAM.padPx);
+  // The look-ahead point only counts while it doesn't force zooming out past the cars' own fit.
+  let r = minSpan(pad(bbox([...cars, ...ahead]), CAM.padPx), CAM.packMinCars * CAM.carLen);
+  if (fitZoom(r, v) < fitZoom(minSpan(cr, CAM.packMinCars * CAM.carLen), v) * 0.85) r = minSpan(cr, CAM.packMinCars * CAM.carLen);
+  return { cx: (r.x0 + r.x1) / 2, cy: (r.y0 + r.y1) / 2, zoom: clampZoom(fitZoom(r, v), v, track) };
+}
+
+/**
+ * Hard guarantee after smoothing: if any car would be outside the (free part of the) screen,
+ * zoom out and shift just enough to bring it back. Smoothing can lag; this can't.
+ */
+export function contain(s: Shot, pts: { x: number; y: number }[], v: View, ins: { l: number; r: number; t: number; b: number }, marginPx: number): Shot {
+  if (pts.length === 0) return s;
+  const box = pad(bbox(pts), marginPx);
+  const fw = Math.max(100, v.w - ins.l - ins.r), fh = Math.max(100, v.h - ins.t - ins.b);
+  let zoom = s.zoom;
+  const need = fitZoom(box, { w: fw, h: fh });
+  if (need < zoom) zoom = need;
+  // Free area in world units around the shot center.
+  const fx0 = (cx: number) => cx - v.w / 2 / zoom + ins.l / zoom;
+  const fx1 = (cx: number) => cx + v.w / 2 / zoom - ins.r / zoom;
+  const fy0 = (cy: number) => cy - v.h / 2 / zoom + ins.t / zoom;
+  const fy1 = (cy: number) => cy + v.h / 2 / zoom - ins.b / zoom;
+  let { cx, cy } = s;
+  if (box.x1 - box.x0 <= fx1(cx) - fx0(cx)) {
+    if (box.x0 < fx0(cx)) cx += box.x0 - fx0(cx);
+    else if (box.x1 > fx1(cx)) cx += box.x1 - fx1(cx);
+  } else cx += (box.x0 + box.x1) / 2 - (fx0(cx) + fx1(cx)) / 2;
+  if (box.y1 - box.y0 <= fy1(cy) - fy0(cy)) {
+    if (box.y0 < fy0(cy)) cy += box.y0 - fy0(cy);
+    else if (box.y1 > fy1(cy)) cy += box.y1 - fy1(cy);
+  } else cy += (box.y0 + box.y1) / 2 - (fy0(cy) + fy1(cy)) / 2;
+  return { cx, cy, zoom };
 }
 
 function minSpan(r: Rect, span: number): Rect {
@@ -170,7 +188,6 @@ export interface DirectorInput {
 export interface DirectorOutput {
   shot: Shot;
   kind: ShotKind;
-  straggler: string | null;
   /** While set, the host draws cars from recorded poses at 0.5× speed from this tick. */
   slowmo: { fromTick: number; sinceMs: number } | null;
 }
@@ -199,7 +216,6 @@ export class Director {
     const { track } = i;
     let kind: ShotKind = "pack";
     let target: Shot;
-    let straggler: string | null = null;
     let snap = false;
     let k = { pos: CAM.kPos, zoom: CAM.kZoom };
     let slowmo: DirectorOutput["slowmo"] = null;
@@ -225,7 +241,7 @@ export class Director {
         target = wideShot(v, track);
       } else {
         kind = "grid";
-        target = packShot(i.cars, v, track, false).shot;
+        target = packShot(i.cars, v, track, false);
         k = { pos: 3, zoom: 3 };
       }
     } else if (this.cut && i.nowMs - this.cut.atMs < CAM.cutMs) {
@@ -242,11 +258,13 @@ export class Director {
       const holding = this.firstFinishMs !== null && i.nowMs - this.firstFinishMs < CAM.finishHoldMs;
       if ((nearLine && this.firstFinishMs === null) || holding) {
         kind = "finish";
-        target = closeShot(i.finishLine.x, i.finishLine.y, CAM.finishCars, v, track);
+        const close = closeShot(i.finishLine.x, i.finishLine.y, CAM.finishCars, v, track);
+        const racing = i.cars.filter((c) => !c.finished);
+        // Photo finish, but never at the cost of losing someone still racing.
+        const all = packShot([...racing, { pid: "", x: i.finishLine.x, y: i.finishLine.y, a: 0, dist: -Infinity, finished: false }], v, track, false);
+        target = all.zoom < close.zoom ? all : close;
       } else {
-        const p = packShot(i.cars.filter((c) => !c.finished || i.cars.every((x) => x.finished)), v, track);
-        target = p.shot;
-        straggler = p.straggler;
+        target = packShot(i.cars.filter((c) => !c.finished || i.cars.every((x) => x.finished)), v, track);
       }
     }
 
@@ -257,6 +275,11 @@ export class Director {
     const w = i.world;
     target = clampToWorld(target, full, { x0: w.x0 - ins.l / z, y0: w.y0 - ins.t / z, x1: w.x1 + ins.r / z, y1: w.y1 + ins.b / z });
     this.cur = !this.cur || snap ? target : follow(this.cur, target, i.dtMs, k.pos, k.zoom);
-    return { shot: this.cur, kind, straggler, slowmo };
+    // Everyone still racing stays on screen in every live shot (not the short trap replay or the intro).
+    if (kind === "pack" || kind === "finish" || kind === "grid") {
+      const racing = i.cars.filter((c) => !c.finished);
+      this.cur = contain(this.cur, racing, full, ins, CAM.containPx);
+    }
+    return { shot: this.cur, kind, slowmo };
   }
 }

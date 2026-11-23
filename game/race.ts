@@ -45,7 +45,7 @@ export class RaceHost {
   private fpsFrames = 0;
   private fpsMs = 0;
   /** Filled by the scene each frame for the HUD. */
-  camera: CameraInfo = { kind: "wide", straggler: null, slowmo: false, layout: null };
+  camera: CameraInfo = { kind: "wide", slowmo: false, layout: null };
   /** Latest event banner for the big screen (top center). Shown for BANNER_TICKS. */
   banner: { key: StringKey; vars: Record<string, string | number>; tick: number } | null = null;
   /** Dev hook: runs after every physics tick (fake-phone bots). */
@@ -157,6 +157,12 @@ export class RaceHost {
       } else if (car.lap === r.laps - 1 && r.cars.every((c) => c === car || c.lap < car.lap)) {
         this.banner = { key: "banner.finalLap", vars: { name }, tick: r.tick };
       }
+    }
+
+    // A respawned car jumps; don't draw it gliding across the map.
+    for (const pid of r.respawned) {
+      const c = r.cars.find((c) => c.pid === pid)!;
+      this.prev.set(pid, { x: c.x, y: c.y, a: c.a });
     }
 
     const snap = new Map<string, Pose>();

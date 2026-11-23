@@ -1,9 +1,9 @@
 // Phaser scene for the big screen. Fills the whole window (RESIZE). Shows the track's pre-made
 // background, steps the race (fixed 60 Hz inside RaceHost) and draws interpolated cars.
-// Three cameras, all driven once per frame with no network traffic:
-//   main      broadcast camera (Director: intro → grid → pack, trap cuts, finish line)
+// Two cameras, both driven once per frame with no network traffic:
+//   main      broadcast camera (Director: intro → grid → pack, trap cuts, finish line);
+//             every car still racing is always in frame
 //   minimap   whole track + colored dots, top-left
-//   straggler small window following a car that fell far behind (only when needed)
 
 import * as Phaser from "phaser";
 import { CAM, Director, type CarPos } from "./camera";
@@ -35,7 +35,6 @@ interface CarSprites {
 class RaceScene extends Phaser.Scene {
   private cars = new Map<string, CarSprites>();
   private mini!: Phaser.Cameras.Scene2D.Camera;
-  private strag!: Phaser.Cameras.Scene2D.Camera;
   private bg!: Phaser.GameObjects.Image;
   private miniMap!: Phaser.GameObjects.Image;
   private layout!: HudLayout;
@@ -61,9 +60,7 @@ class RaceScene extends Phaser.Scene {
     this.makeCarTexture();
 
     this.mini = this.cameras.add(0, 0, 10, 10, false, "minimap").setBackgroundColor("rgba(11,29,42,0.55)");
-    this.strag = this.cameras.add(0, 0, 10, 10, false, "straggler").setBackgroundColor(WATER).setVisible(false);
     this.cameras.main.ignore(this.miniMap);
-    this.strag.ignore(this.miniMap);
     this.mini.ignore(this.bg);
 
     this.scale.on(Phaser.Scale.Events.RESIZE, (size: Phaser.Structs.Size) => this.relayout(size.width, size.height));
@@ -77,8 +74,6 @@ class RaceScene extends Phaser.Scene {
     this.cameras.main.setViewport(0, 0, w, h);
     const m = this.layout.minimap;
     this.mini.setViewport(m.x, m.y, m.w, m.h).setZoom(m.w / (b.x1 - b.x0)).centerOn((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
-    const s = this.layout.straggler;
-    this.strag.setViewport(s.x, s.y, s.w, s.h).setZoom(Math.min(s.w, s.h) / (10 * CAM.carLen));
     for (const car of this.cars.values()) car.dot.setRadius(this.dotRadius());
     this.host.camera.layout = this.layout;
   }
@@ -123,6 +118,8 @@ class RaceScene extends Phaser.Scene {
         const pose = replayTick !== null ? this.host.poseAt(c.pid, replayTick)! : this.host.pose(c.pid)!;
         const car = this.carFor(c.pid);
         car.body.setPosition(pose.x, pose.y).setRotation(pose.a);
+        // Just respawned: blink while it can't be bumped.
+        if (c.ghost > 0) car.body.setAlpha(Math.floor(time / 120) % 2 ? 0.35 : 0.9);
         car.label.setPosition(pose.x, pose.y - 24 * labelScale).setScale(labelScale);
         const livePose = this.host.pose(c.pid)!;
         car.dot.setPosition(livePose.x, livePose.y);
@@ -136,19 +133,7 @@ class RaceScene extends Phaser.Scene {
       this.cars.delete(pid);
     }
 
-    // Straggler window: follow the car the pack shot left out.
-    let sp = out.straggler ? this.host.pose(out.straggler) : null;
-    if (sp) {
-      // Only when it's really off screen (the free area left of the tower).
-      const wv = cam.worldView;
-      const freeX1 = wv.x + wv.width - this.layout.towerW / out.shot.zoom;
-      if (sp.x > wv.x && sp.x < freeX1 && sp.y > wv.y && sp.y < wv.y + wv.height) sp = null;
-    }
-    this.strag.setVisible(!!sp);
-    if (sp) this.strag.centerOn(sp.x, sp.y);
-
     this.host.camera.kind = out.kind;
-    this.host.camera.straggler = sp ? out.straggler : null;
     this.host.camera.slowmo = replayTick !== null;
   }
 
@@ -164,7 +149,6 @@ class RaceScene extends Phaser.Scene {
       const dot = this.add.circle(0, 0, this.dotRadius(), 0xffffff).setStrokeStyle(2 / this.mini.zoom, 0x0b1d2a).setDepth(4);
       this.mini.ignore([body, label]);
       this.cameras.main.ignore(dot);
-      this.strag.ignore(dot);
       car = { body, label, dot };
       this.cars.set(pid, car);
     }

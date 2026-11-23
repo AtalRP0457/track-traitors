@@ -28,3 +28,35 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
+
+/* Host: glitch static flash (no image asset, just stripes + flicker). */
+.glitch-static {
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.18) 0 2px, rgba(0, 0, 0, 0.25) 2px 4px),
+    repeating-linear-gradient(90deg, rgba(255, 122, 26, 0.15) 0 3px, transparent 3px 7px);
+  mix-blend-mode: hard-light;
+  animation: glitch-flicker 0.08s steps(2) infinite;
+}
+@keyframes glitch-flicker {
+  0% { transform: translate(0, 0); opacity: 0.9; }
+  50% { transform: translate(-6px, 3px); opacity: 0.6; }
+  100% { transform: translate(4px, -2px); opacity: 0.85; }
+}
+
+/* Host: reactions float up and fade. */
+.reaction {
+  animation: reaction-up 3s ease-out forwards;
+}
+@keyframes reaction-up {
+  from { transform: translateY(0) scale(0.6); opacity: 0; }
+  10% { transform: translateY(-20px) scale(1.1); opacity: 1; }
+  to { transform: translateY(-420px) scale(1); opacity: 0; }
+}
+
+/* Phone draft: the trap zones pulse while a card is picked. */
+.zone-glow {
+  animation: zone-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes zone-pulse {
+  from { stroke-opacity: 0.45; }
+  to { stroke-opacity: 0.95; }
+}

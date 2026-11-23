@@ -18,6 +18,8 @@ export interface Track extends Loop {
   cps: number[];
   /** Smoothed racing line for bots. */
   line: Loop;
+  /** Narrow one-car bridges (hazard kind "bridge"): [from, to) distance along the centerline + half width. */
+  bridges: { s0: number; s1: number; half: number }[];
 }
 
 export const SAMPLES_PER_SEGMENT = 8;
@@ -60,7 +62,38 @@ export function buildTrack(def: TrackFile): Track {
     ...loop,
     cps: def.checkpoints.map((i) => loop.ds[i * SAMPLES_PER_SEGMENT]),
     line: smoothLoop(def.racingLine),
+    bridges: def.hazards
+      .filter((h) => h.kind === "bridge" && Number.isInteger(h.from) && Number.isInteger(h.to) && typeof h.width === "number")
+      .map((h) => ({ s0: loop.ds[(h.from as number) * SAMPLES_PER_SEGMENT], s1: loop.ds[(h.to as number) * SAMPLES_PER_SEGMENT], half: (h.width as number) / 2 })),
   };
+}
+
+/** Bridge at centerline distance s (wrapped), if any. */
+export function bridgeAt(t: Track, s: number) {
+  for (const b of t.bridges) if (s >= b.s0 && s < b.s1) return b;
+  return null;
+}
+
+/** Half the drivable width at centerline distance s. */
+export function roadHalf(t: Track, s: number): number {
+  return bridgeAt(t, s)?.half ?? t.def.width / 2;
+}
+
+/** Even-odd point-in-polygon test. */
+export function inPoly(poly: [number, number][], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Ground type under a point: surfaces drawn later win. "road" when on none. */
+export function surfaceAt(t: Track, x: number, y: number): "road" | "sand" | "water" {
+  let kind: "road" | "sand" | "water" = "road";
+  for (const s of t.def.surfaces) if (inPoly(s.poly, x, y)) kind = s.kind;
+  return kind;
 }
 
 /** World rect covering the road (with curbs): what "the whole track" means for the camera. */
@@ -109,6 +142,20 @@ export function project(t: Loop, x: number, y: number, hint = -1): Projection {
     if (off < best.off) best = { i, s: t.ds[i] + u * Math.sqrt(segLen2), off };
   }
   return best;
+}
+
+/** Sample index of the segment containing distance s (wraps). Unambiguous, unlike project()
+ *  at a figure-8 crossing where two parts of the loop meet. */
+export function indexAt(t: Loop, s: number): number {
+  const L = t.length;
+  s = ((s % L) + L) % L;
+  let lo = 0, hi = t.ds.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (t.ds[mid] <= s) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }
 
 /** Point and heading on the centerline at distance s (wraps around). */

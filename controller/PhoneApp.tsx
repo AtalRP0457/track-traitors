@@ -7,9 +7,11 @@ import { randomName } from "@/shared/names";
 import { openRoom, send, store } from "@/shared/net";
 import { NetSim, simFromQuery } from "@/shared/netsim";
 import { ordinal, t } from "@/shared/strings";
-import { parseMsg, type AnyMsg, type ErrorMsg, type LobbyMsg, type Phase, type ResultMsg, type WelcomeMsg } from "@/shared/protocol";
+import { parseMsg, type AnyMsg, type BotInfo, type Clue, type ErrorMsg, type LobbyMsg, type Phase, type ResultMsg, type RoleMsg, type WelcomeMsg } from "@/shared/protocol";
+import type { Card } from "@/shared/rules";
 import type { PartySocket } from "partysocket";
 import Controls from "./Controls";
+import { Draft, GlitchPicker, Reactions, RoleCard, Tap, Vote, type Seat as SeatInfo } from "./MatchScreens";
 
 type Seat = { pid: string; seat: string; name: string; color: string };
 const seatKey = (code: string) => `tt-seat-${code}`;
@@ -31,6 +33,20 @@ export default function PhoneApp() {
   const [rtt, setRtt] = useState<{ ms: number; viaHost: boolean } | null>(null);
   const [tt, setTt] = useState<number | null>(null);
   const [, setNow] = useState(0);
+  // Traitors match state (secrets here are only this phone's own).
+  const [role, setRole] = useState<RoleMsg | null>(null);
+  const [draft, setDraft] = useState<{ cards: Card[]; n: number; endAt: number; track: string } | null>(null);
+  const [mine, setMine] = useState<[Card, number, number][]>([]);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [bots, setBots] = useState<BotInfo[]>([]);
+  const [info, setInfo] = useState<{ race?: number; races?: number; clues: Clue[]; endAt: number }>({ clues: [], endAt: 0 });
+  const [voted, setVoted] = useState<string | null>(null);
+  const [voteResult, setVoteResult] = useState<{ caught: string | null; traitor: boolean } | null>(null);
+  const [caught, setCaught] = useState<string[]>([]);
+  const [reveal, setReveal] = useState<string[] | null>(null);
+  const [glitchedUntil, setGlitchedUntil] = useState(0);
+  const [glitchUsed, setGlitchUsed] = useState(false);
+  const [picking, setPicking] = useState(false);
   const wsRef = useRef<PartySocket | null>(null);
   // Dev: ?lag=&jitter=&loss= on the /play URL simulates a bad network on this phone.
   const sim = useRef<NetSim | null>(null);
@@ -85,6 +101,23 @@ export default function PhoneApp() {
         case "phase": {
           const ph = m.phase as Phase;
           setPhase(ph);
+          const endAt = performance.now() + Number(m.ms ?? 0);
+          setInfo({ race: m.race as number | undefined, races: m.races as number | undefined, clues: (m.clues as Clue[]) ?? [], endAt });
+          if (ph === "lobby") {
+            setRole(null);
+            setScores({});
+            setBots([]);
+          }
+          if (ph === "role") {
+            setReveal(null);
+            setCaught([]);
+            setVoteResult(null);
+          }
+          if (ph === "draft") setVoteResult(null);
+          if (ph !== "draft") setDraft(null);
+          if (ph === "vote") setVoted(null);
+          if (ph === "race") setGlitchUsed(false);
+          if (ph !== "race") setPicking(false);
           if (ph === "countdown") {
             setCountdownEnd(performance.now() + Number(m.ms ?? 0));
             setLap(0);
@@ -95,6 +128,37 @@ export default function PhoneApp() {
         }
         case "lap":
           setLap(Number(m.lap));
+          break;
+        case "role":
+          setRole(m as unknown as RoleMsg);
+          break;
+        case "draft":
+          setDraft({ cards: m.cards as Card[], n: Number(m.n), endAt: performance.now() + Number(m.ms ?? 0), track: String(m.track) });
+          break;
+        case "mytraps":
+          setMine(m.list as [Card, number, number][]);
+          break;
+        case "scores":
+          setScores(m.scores as Record<string, number>);
+          break;
+        case "seats":
+          setBots(m.bots as BotInfo[]);
+          break;
+        case "voteresult": {
+          const vr = { caught: (m.caught as string | null) ?? null, traitor: m.traitor === true };
+          setVoteResult(vr);
+          if (vr.caught && vr.traitor) setCaught((c) => [...c, vr.caught!]);
+          break;
+        }
+        case "reveal":
+          setReveal((m.traitors as string[]) ?? []);
+          break;
+        case "glitched":
+          setGlitchedUntil(performance.now() + Number(m.ms));
+          navigator.vibrate?.([60, 40, 60]);
+          break;
+        case "glitchok":
+          if (m.ok) setGlitchUsed(true);
           break;
         case "result":
           setResult(m as unknown as ResultMsg);
@@ -170,9 +234,9 @@ export default function PhoneApp() {
     };
   }, [racing]);
 
-  // Tick the countdown display.
+  // Tick the countdown display (and the glitched banner).
   useEffect(() => {
-    if (phase !== "countdown") return;
+    if (phase !== "countdown" && phase !== "race" && phase !== "role") return;
     const id = setInterval(() => setNow(performance.now()), 100);
     return () => clearInterval(id);
   }, [phase]);
@@ -186,6 +250,22 @@ export default function PhoneApp() {
   };
 
   const startReq = () => tx({ v: 1, t: "startreq" });
+  const place = (card: Card, x: number, y: number) => tx({ v: 1, t: "place", card, x, y });
+  const vote = (who: string) => {
+    setVoted(who);
+    navigator.vibrate?.(15);
+    tx({ v: 1, t: "vote", who });
+  };
+  const glitch = (target: string) => {
+    setPicking(false);
+    setGlitchUsed(true);
+    navigator.vibrate?.(20);
+    tx({ v: 1, t: "glitch", target });
+  };
+  const react = (e: number) => {
+    navigator.vibrate?.(8);
+    tx({ v: 1, t: "react", e });
+  };
 
   // ---------- screens ----------
 
@@ -256,12 +336,39 @@ export default function PhoneApp() {
   const hostOk = connected && lobby.host;
   const status = <Status connected={connected} host={lobby.host} rtt={rtt} tt={tt} />;
   const inRace = racing && (lobby.players.some((p) => p.pid === me.pid));
+  const seats = new Map<string, SeatInfo>([...lobby.players, ...bots].map((p) => [p.pid, p]));
+  const nameOf = (pid: string) => seats.get(pid)?.name ?? "?";
+  const traitor = role?.role === "traitor";
+  const canGlitch = traitor && !role?.caught && phase === "race" && !glitchUsed && lap < LAPS;
+  const raceOf = info.race && info.races ? t("host.raceOf", { race: info.race, races: info.races }) : "";
+  const myScore = scores[me.pid];
 
   if (inRace) {
     const left = Math.max(0, Math.ceil((countdownEnd - performance.now()) / 1000));
+    const glitched = performance.now() < glitchedUntil;
     return (
       <main className="controller">
-        <Controls color={me.color} onSteer={steer} />
+        <Controls color={me.color} onSteer={steer} bottom={traitor ? 88 : 0} />
+        {traitor && (
+          <div className="absolute inset-x-2 bottom-2 flex h-20">
+            <Tap
+              onTap={() => setPicking(true)}
+              disabled={!canGlitch}
+              className="flex-1 rounded-3xl text-3xl font-black text-black"
+              style={{ background: "var(--traitor)" }}
+            >
+              {glitchUsed || role?.caught ? t("glitch.used") : t("glitch.button")}
+            </Tap>
+          </div>
+        )}
+        {picking && canGlitch && (
+          <GlitchPicker rivals={[...seats.values()].filter((p) => p.pid !== me.pid && !(role?.mates ?? []).includes(p.pid))} onPick={glitch} onCancel={() => setPicking(false)} />
+        )}
+        {glitched && (
+          <div className="glitch-static pointer-events-none absolute inset-x-0 top-1/3 flex items-center justify-center py-6 text-3xl font-black" style={{ color: "var(--traitor)" }}>
+            {t("glitch.hit")}
+          </div>
+        )}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex h-14 items-center justify-between px-4 text-lg font-bold">
           <span className="flex items-center gap-2">
             <span className="h-4 w-4 rounded-full" style={{ background: me.color }} />
@@ -278,11 +385,43 @@ export default function PhoneApp() {
     );
   }
 
+  if (phase === "role" && role) {
+    return (
+      <Screen>
+        <div className="absolute right-4 top-4">{status}</div>
+        {raceOf && <div className="opacity-70">{raceOf}</div>}
+        <RoleCard role={role.role} mates={role.mates} caught={role.caught} seats={seats} />
+      </Screen>
+    );
+  }
+
+  if (phase === "draft" && draft) {
+    return (
+      <main className="controller flex flex-col">
+        <div className="absolute right-3 top-3 z-10">{status}</div>
+        <Draft trackId={draft.track} cards={draft.cards} n={draft.n} mine={mine} endAt={draft.endAt} onPlace={place} />
+      </main>
+    );
+  }
+
+  if (phase === "vote") {
+    const candidates = lobby.players.filter((p) => p.pid !== me.pid && !caught.includes(p.pid));
+    return (
+      <main className="controller flex flex-col">
+        <Vote candidates={candidates} clues={info.clues} name={nameOf} endAt={info.endAt} voted={voted} onVote={vote} />
+      </main>
+    );
+  }
+
   const isVip = lobby.vip === me.pid;
   const myPlace = result ? result.places.findIndex((p) => p.pid === me.pid) : -1;
+  const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const overall = ranking.findIndex(([pid]) => pid === me.pid);
+  const between = phase === "results" || phase === "reveal" || phase === "draft" || phase === "role";
   return (
     <Screen>
       <div className="absolute right-4 top-4">{status}</div>
+      {raceOf && phase !== "lobby" && phase !== "podium" && <div className="opacity-70">{raceOf}</div>}
       <div className="h-16 w-16 rounded-full" style={{ background: me.color }} />
       <h1 className="text-3xl font-black">{me.name}</h1>
       {!lobby.host && <p className="text-xl text-yellow-300">{t("race.hostGone")}</p>}
@@ -291,12 +430,36 @@ export default function PhoneApp() {
           {t("phone.place", { medal: ["🥇", "🥈", "🥉"][myPlace] ?? "", n: ordinal(myPlace + 1) })}
         </p>
       )}
-      <p className="text-xl opacity-80">{t("phone.inRoom", { n: lobby.players.length })}</p>
-      {isVip ? (
-        <Big onPress={startReq}>{phase === "results" ? t("race.raceAgain") : t("race.startRace")}</Big>
-      ) : (
-        <p className="text-xl opacity-80">{t("phone.waitingFor", { name: lobby.players.find((p) => p.pid === lobby.vip)?.name ?? t("phone.theHost") })}</p>
+      {phase === "reveal" && voteResult && (
+        <p className="text-3xl font-black" style={{ color: voteResult.traitor ? "var(--traitor)" : "var(--racer)" }}>
+          {voteResult.caught ? t(voteResult.traitor ? "reveal.caughtTraitor" : "reveal.innocent", { name: nameOf(voteResult.caught) }) : t("reveal.nobody")}
+        </p>
       )}
+      {phase === "podium" && overall >= 0 && (
+        <p className="text-4xl font-black">{["🥇", "🥈", "🥉"][overall] ?? ""} {t("phone.overall", { n: ordinal(overall + 1) })}</p>
+      )}
+      {phase === "podium" && reveal && (
+        <p className="text-2xl font-bold" style={{ color: "var(--traitor)" }}>
+          {reveal.includes(me.pid)
+            ? t("phone.youWereTraitor")
+            : reveal.length === 0
+              ? t("podium.noTraitors")
+              : t(reveal.length > 1 ? "podium.traitors" : "podium.traitor", { names: reveal.map(nameOf).join(", ") })}
+        </p>
+      )}
+      {myScore !== undefined && phase !== "lobby" && <p className="text-2xl font-bold">{t("phone.score", { n: myScore })}</p>}
+      {between && <p className="text-xl opacity-80">📺 {t("phone.watchTv")}</p>}
+      {(phase === "lobby" || phase === "podium") && (
+        <>
+          <p className="text-xl opacity-80">{t("phone.inRoom", { n: lobby.players.length })}</p>
+          {isVip ? (
+            <Big onPress={startReq}>{phase === "podium" ? t("race.playAgain") : t("race.startMatch")}</Big>
+          ) : (
+            <p className="text-xl opacity-80">{t("phone.waitingFor", { name: lobby.players.find((p) => p.pid === lobby.vip)?.name ?? t("phone.theHost") })}</p>
+          )}
+        </>
+      )}
+      <Reactions onReact={react} />
     </Screen>
   );
 }

@@ -10,7 +10,9 @@ import { CAM, Director, type CarPos } from "./camera";
 import { hudLayout, type HudLayout } from "./hud";
 import type { RaceHost } from "./race";
 import { DT } from "./sim";
-import { pointAt, trackBounds } from "./track";
+import { CARD_ICON } from "../shared/rules";
+import { FX } from "./sim";
+import { pointAt, trackBounds, type Track } from "./track";
 
 const WATER = 0x1f8fcf;
 const BG_RES = 2;
@@ -39,24 +41,54 @@ class RaceScene extends Phaser.Scene {
   private miniMap!: Phaser.GameObjects.Image;
   private layout!: HudLayout;
   private bounds = { x0: 0, y0: 0, x1: 1, y1: 1 };
+  private shownTrack = "";
+  private loadingTrack: string | null = null;
+  /** Traps that went off this race, drawn where they were. Hidden ones are never drawn. */
+  private trapIcons = new Map<number, Phaser.GameObjects.Text>();
+  private trapRace: unknown = null;
 
   constructor(private host: RaceHost, private director: Director) {
     super("race");
   }
 
   preload() {
-    const { def } = this.host.track!;
+    this.queueTrack(this.host.track!);
+  }
+
+  /** Each track's images load only when it's chosen (PLAN.md 5: "Load each track only when chosen"). */
+  private queueTrack(t: Track) {
+    const { def } = t;
     // Rasterize at 2× so the broadcast camera's close-ups stay sharp.
-    this.load.svg("track", def.background, { width: def.world.w * BG_RES, height: def.world.h * BG_RES });
-    this.load.svg("minimap", def.minimap, { width: 640, height: Math.round((640 * def.world.h) / def.world.w) });
+    this.load.svg(`bg-${def.id}`, def.background, { width: def.world.w * BG_RES, height: def.world.h * BG_RES });
+    this.load.svg(`mini-${def.id}`, def.minimap, { width: 640, height: Math.round((640 * def.world.h) / def.world.w) });
+  }
+
+  /** Show the host's current track; loads its images first if needed. */
+  private syncTrack() {
+    const t = this.host.track;
+    if (!t || t.def.id === this.shownTrack) return;
+    if (!this.textures.exists(`bg-${t.def.id}`) || !this.textures.exists(`mini-${t.def.id}`)) {
+      if (this.loadingTrack === t.def.id) return;
+      this.loadingTrack = t.def.id;
+      this.queueTrack(t);
+      this.load.once(Phaser.Loader.Events.COMPLETE, () => (this.loadingTrack = null));
+      this.load.start();
+      return;
+    }
+    this.shownTrack = t.def.id;
+    this.bounds = trackBounds(t);
+    this.bg.setTexture(`bg-${t.def.id}`).setDisplaySize(t.def.world.w, t.def.world.h);
+    this.miniMap.setTexture(`mini-${t.def.id}`).setDisplaySize(t.def.world.w, t.def.world.h);
+    this.relayout(this.scale.width, this.scale.height);
   }
 
   create() {
     const t = this.host.track!;
+    this.shownTrack = t.def.id;
     this.bounds = trackBounds(t);
-    this.bg = this.add.image(0, 0, "track").setOrigin(0).setDisplaySize(t.def.world.w, t.def.world.h).setDepth(0);
+    this.bg = this.add.image(0, 0, `bg-${t.def.id}`).setOrigin(0).setDisplaySize(t.def.world.w, t.def.world.h).setDepth(0);
     // Minimap image covers the world exactly (its viewBox is the world), seen only by the minimap camera.
-    this.miniMap = this.add.image(0, 0, "minimap").setOrigin(0).setDisplaySize(t.def.world.w, t.def.world.h).setDepth(0);
+    this.miniMap = this.add.image(0, 0, `mini-${t.def.id}`).setOrigin(0).setDisplaySize(t.def.world.w, t.def.world.h).setDepth(0);
     this.makeCarTexture();
 
     this.mini = this.cameras.add(0, 0, 10, 10, false, "minimap").setBackgroundColor("rgba(11,29,42,0.55)");
@@ -84,6 +116,7 @@ class RaceScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     this.host.update(delta);
+    this.syncTrack();
     const race = this.host.race;
     const t = this.host.track!;
     const live: CarPos[] = [];
@@ -93,7 +126,7 @@ class RaceScene extends Phaser.Scene {
     const out = this.director.update({
       nowMs: time,
       dtMs: delta,
-      phase: this.host.phase,
+      phase: directorPhase(this.host.phase),
       countdownLeft: this.host.countdownLeft,
       cars: live,
       tick: this.host.renderTick,
@@ -117,7 +150,9 @@ class RaceScene extends Phaser.Scene {
         seen.add(c.pid);
         const pose = replayTick !== null ? this.host.poseAt(c.pid, replayTick)! : this.host.pose(c.pid)!;
         const car = this.carFor(c.pid);
-        car.body.setPosition(pose.x, pose.y).setRotation(pose.a);
+        // Ramp: the car grows a little while it's in the air.
+        const jump = c.air > 0 ? 1 + 0.4 * Math.sin((Math.PI * (FX.air - c.air)) / FX.air) : 1;
+        car.body.setPosition(pose.x, pose.y).setRotation(pose.a).setScale(jump).setDepth(c.air > 0 ? 2.5 : 2);
         // Just respawned: blink while it can't be bumped.
         if (c.ghost > 0) car.body.setAlpha(Math.floor(time / 120) % 2 ? 0.35 : 0.9);
         car.label.setPosition(pose.x, pose.y - 24 * labelScale).setScale(labelScale);
@@ -125,6 +160,7 @@ class RaceScene extends Phaser.Scene {
         car.dot.setPosition(livePose.x, livePose.y);
       }
     }
+    this.drawTraps(labelScale);
     for (const [pid, car] of this.cars) {
       if (seen.has(pid)) continue;
       car.body.destroy();
@@ -137,9 +173,30 @@ class RaceScene extends Phaser.Scene {
     this.host.camera.slowmo = replayTick !== null;
   }
 
+  /** Traps appear only once triggered (PLAN.md 2: invisible until a car touches one). */
+  private drawTraps(scale: number) {
+    const race = this.host.race;
+    if (race !== this.trapRace) {
+      for (const icon of this.trapIcons.values()) icon.destroy();
+      this.trapIcons.clear();
+      this.trapRace = race;
+    }
+    if (!race) return;
+    for (const trap of race.traps) {
+      if (trap.live) continue;
+      let icon = this.trapIcons.get(trap.id);
+      if (!icon) {
+        icon = this.add.text(trap.x, trap.y, CARD_ICON[trap.card], { fontSize: "34px" }).setOrigin(0.5).setDepth(1.5);
+        this.mini.ignore(icon);
+        this.trapIcons.set(trap.id, icon);
+      }
+      icon.setScale(Math.max(0.8, scale));
+    }
+  }
+
   private carFor(pid: string): CarSprites {
     let car = this.cars.get(pid);
-    const info = this.host.players.find((p) => p.pid === pid);
+    const info = this.host.roster.find((p) => p.pid === pid);
     if (!car) {
       const body = this.add.image(0, 0, "car").setDepth(2);
       const label = this.add
@@ -179,4 +236,10 @@ class RaceScene extends Phaser.Scene {
     g.generateTexture("car", 38, 24);
     g.destroy();
   }
+}
+
+/** The camera only needs to know: wide shot, countdown, live race, or wide again after. */
+function directorPhase(p: RaceHost["phase"]): "lobby" | "countdown" | "race" | "results" {
+  if (p === "countdown" || p === "race") return p;
+  return p === "lobby" || p === "role" || p === "draft" ? "lobby" : "results";
 }

@@ -3,18 +3,36 @@
 import QRCode from "qrcode";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { analytics } from "@/shared/analytics";
-import { DEFAULT_TRACK, LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
-import { t } from "@/shared/strings";
+import { LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
+import { DEFAULT_SETTINGS, REACTIONS, TRACKS, trackForRace, type MatchSettings } from "@/shared/rules";
+import { t, type StringKey } from "@/shared/strings";
+import { clueText } from "@/shared/clues";
 import { openRoom, randomToken, send, store } from "@/shared/net";
-import { parseMsg, type AnyMsg, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
+import { parseMsg, type AnyMsg, type Clue, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
 import type { PartySocket } from "partysocket";
 import { Director } from "./camera";
 import { DevBotRelay } from "./devbots";
 import { percentile, RaceHost } from "./race";
 import { parseTrack, trackUrl } from "@/shared/track-format";
-import { buildTrack } from "./track";
+import { buildTrack, type Track } from "./track";
 
 const HOST_KEY = "tt-host";
+const SETTINGS_KEY = "tt-settings";
+
+/** Fetch + build a track once per page; later races reuse it. */
+const trackCache = new Map<string, Promise<Track>>();
+function fetchTrack(id: string): Promise<Track> {
+  let p = trackCache.get(id);
+  if (!p) {
+    p = fetch(trackUrl(id)).then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return buildTrack(parseTrack(await res.json()));
+    });
+    p.catch(() => trackCache.delete(id));
+    trackCache.set(id, p);
+  }
+  return p;
+}
 
 export default function HostApp() {
   const [code, setCode] = useState<string | null>(null);
@@ -40,7 +58,11 @@ export default function HostApp() {
 
   // One RaceHost for the life of the page; it sends through whichever socket is current.
   if (!hostRef.current) {
-    hostRef.current = new RaceHost(null, (m) => tx(m), rerender, analytics.log);
+    const h = new RaceHost(null, (m) => tx(m), rerender, analytics.log);
+    h.settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<MatchSettings>>(SETTINGS_KEY) };
+    h.loadTrack = fetchTrack;
+    h.onTrapCut = (x, y) => director.trapHit(x, y, performance.now(), h.renderTick);
+    hostRef.current = h;
   }
   const host = hostRef.current;
   // Dev-only handle for debugging from the browser console.
@@ -90,6 +112,27 @@ export default function HostApp() {
         case "start":
           host.start();
           break;
+        case "progress":
+          host.onProgress(Number(m.n), Number(m.of));
+          break;
+        case "traps":
+          host.onTraps(Number(m.race), Array.isArray(m.list) ? m.list : []);
+          break;
+        case "glitch":
+          host.onGlitch(String(m.target));
+          break;
+        case "react":
+          host.onReact(String(m.p), Number(m.e), performance.now());
+          break;
+        case "voteresult":
+          host.onVoteResult(typeof m.caught === "string" ? m.caught : null, m.traitor === true);
+          break;
+        case "scores":
+          host.onScores((m.scores ?? {}) as Record<string, number>);
+          break;
+        case "reveal":
+          host.onReveal(Array.isArray(m.traitors) ? m.traitors.map(String) : []);
+          break;
         case "lobby":
           setLobby(m as unknown as LobbyMsg);
           host.setLobby(m as unknown as LobbyMsg);
@@ -116,11 +159,9 @@ export default function HostApp() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(trackUrl(DEFAULT_TRACK));
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        host.track = buildTrack(parseTrack(await res.json()));
+        host.track = await fetchTrack(trackForRace(host.settings, 1));
       } catch (e) {
-        setTrackError(t("host.trackError", { id: DEFAULT_TRACK, err: (e as Error).message }));
+        setTrackError(t("host.trackError", { id: trackForRace(host.settings, 1), err: (e as Error).message }));
         return;
       }
       const { createGame } = await import("./scene");
@@ -230,13 +271,28 @@ export default function HostApp() {
     location.reload();
   };
 
-  const byPid = new Map((lobby?.players ?? []).map((p) => [p.pid, p]));
+  const roster = host.roster;
+  const byPid = new Map(roster.map((p) => [p.pid, p]));
+  const isBot = (pid: string) => host.bots.some((b) => b.pid === pid);
   const phase = host.phase;
   const cam = host.camera;
   const L = cam.layout;
   const u = L?.u ?? 1;
   const racing = (phase === "race" || phase === "countdown") && host.race;
   const showBanner = host.banner && host.race && host.race.tick - host.banner.tick < 180;
+  const secs = Math.max(0, Math.ceil(host.phaseLeft / 1000));
+  const raceOf = t("host.raceOf", { race: host.raceNo, races: host.match.races });
+  const hidden = host.race?.traps.filter((x) => x.live).length ?? 0;
+  const glitching = host.race && phase === "race" && host.race.tick < host.glitchFlash;
+  const setSetting = (patch: Partial<MatchSettings>) => {
+    host.settings = { ...host.settings, ...patch };
+    store.set(SETTINGS_KEY, host.settings);
+    rerender();
+  };
+  const scoreboard = [...roster].sort((a, b) => (host.scores[b.pid] ?? 0) - (host.scores[a.pid] ?? 0));
+  const tag = (pid: string) =>
+    host.knownTraitors.has(pid) ? <span className="ml-2 rounded bg-[var(--traitor)] px-2 text-sm font-black uppercase text-black">{t(host.revealed ? "host.traitorTag" : "host.caughtTag")}</span>
+    : isBot(pid) ? <span className="ml-2 rounded bg-white/20 px-2 text-sm uppercase">{t("host.bot")}</span> : null;
 
   return (
     <main className="fixed inset-0 overflow-hidden" style={{ cursor: cursorHidden ? "none" : undefined }}>
@@ -260,6 +316,7 @@ export default function HostApp() {
             <PlayerGrid players={lobby?.players ?? []} vip={lobby?.vip ?? null} />
             {lobby && lobby.players.length === 0 && <p className="opacity-70">{t("host.scanToJoin")}</p>}
           </section>
+          <Settings s={host.settings} set={setSetting} />
           <div className="flex items-center gap-6">
             <button
               onClick={() => host.start()}
@@ -267,12 +324,29 @@ export default function HostApp() {
               className="rounded-2xl px-8 py-4 text-2xl font-black text-black disabled:opacity-30"
               style={{ background: "var(--racer)" }}
             >
-              {t("race.startRace")}
+              {t("race.startMatch")}
             </button>
             <button onClick={newRoom} className="text-sm underline opacity-50">
               {t("host.newCode")}
             </button>
           </div>
+        </Overlay>
+      )}
+
+      {phase === "role" && (
+        <Overlay>
+          <h1 className="text-7xl font-black">{t("host.roleTitle")}</h1>
+          <p className="text-3xl">📱 {t("host.roleSub")}</p>
+          <div className="text-6xl font-black opacity-80">{secs}</div>
+        </Overlay>
+      )}
+
+      {phase === "draft" && (
+        <Overlay>
+          <div className="text-2xl uppercase tracking-widest opacity-70">{raceOf} · {host.track ? t(`track.${host.track.def.id}` as StringKey) : ""}</div>
+          <h1 className="text-7xl font-black" style={{ color: "var(--traitor)" }}>{t("host.draftTitle")}</h1>
+          <p className="text-3xl">{t("host.draftSub", { n: host.progress.n, of: host.progress.of })}</p>
+          <div className="text-6xl font-black opacity-80">{secs > 0 ? secs : "…"}</div>
         </Overlay>
       )}
 
@@ -289,6 +363,7 @@ export default function HostApp() {
 
           {/* Positions tower, right edge. */}
           <ol className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 space-y-1 overflow-hidden rounded-l-2xl bg-black/55 font-bold" style={{ width: L.towerW, padding: 12 * u, fontSize: 22 * u }}>
+            <li className="text-center uppercase tracking-widest opacity-60" style={{ fontSize: 14 * u }}>{raceOf}</li>
             {[...host.race!.cars]
               .sort((a, b) => (a.finishMs ?? Infinity) - (b.finishMs ?? Infinity) || b.dist - a.dist)
               .map((c, i) => {
@@ -296,7 +371,7 @@ export default function HostApp() {
                 return (
                   <li key={c.pid} className="flex items-center" style={{ gap: 8 * u }}>
                     <span className="opacity-70" style={{ width: 24 * u }}>{i + 1}</span>
-                    <span className="rounded-full" style={{ background: p?.color, width: 14 * u, height: 14 * u }} />
+                    <span className="shrink-0 rounded-full" style={{ background: p?.color, width: 14 * u, height: 14 * u, outline: host.knownTraitors.has(c.pid) ? `${3 * u}px solid var(--traitor)` : undefined }} />
                     <span className="truncate" style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
                     <span className="ml-auto shrink-0 opacity-70" style={{ paddingLeft: 8 * u, fontSize: 15 * u }}>
                       {c.finishMs !== null ? "🏁" : t("race.lap", { lap: Math.min(c.lap + 1, LAPS), laps: LAPS })}
@@ -308,7 +383,7 @@ export default function HostApp() {
 
           {/* Event banners, top center. */}
           {showBanner && (
-            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 rounded-2xl bg-black/65 font-black" style={{ top: L.pad, padding: `${8 * u}px ${24 * u}px`, fontSize: 36 * u }}>
+            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-black/65 font-black" style={{ top: L.pad, padding: `${8 * u}px ${24 * u}px`, fontSize: 36 * u }}>
               {t(host.banner!.key, host.banner!.vars)}
             </div>
           )}
@@ -317,12 +392,25 @@ export default function HostApp() {
               {t("host.slowmo")}
             </div>
           )}
+
+          {/* Bottom right: traps still hidden (left of the tower). */}
+          {host.race!.traps.length > 0 && (
+            <div className="pointer-events-none absolute rounded-lg bg-black/55 font-bold" style={{ right: L.towerW + L.pad, bottom: L.pad, padding: `${4 * u}px ${12 * u}px`, fontSize: 22 * u }}>
+              {t("host.trapsHidden", { n: hidden })}
+            </div>
+          )}
         </>
       )}
 
+      {/* Glitch: static flash on the TV, never who did it. */}
+      {glitching && <div className="glitch-static pointer-events-none absolute inset-0" />}
+
+      {/* Reactions float up from the bottom. */}
+      <Reactions host={host} byPid={byPid} u={u} />
+
       {/* Bottom left: room code + fullscreen (outside the lobby, which shows them big). */}
       {phase !== "lobby" && (
-        <div className="absolute flex items-center font-bold" style={{ left: L?.pad ?? 16, bottom: L?.pad ?? 16, gap: 12 * u }}>
+        <div className="absolute z-10 flex items-center font-bold" style={{ left: L?.pad ?? 16, bottom: L?.pad ?? 16, gap: 12 * u }}>
           <span className="rounded-lg bg-black/55 font-mono tracking-widest" style={{ padding: `${4 * u}px ${12 * u}px`, fontSize: 22 * u }}>
             {t("host.roomShort", { code: code ?? "" })}
           </span>
@@ -337,8 +425,8 @@ export default function HostApp() {
 
       {phase === "results" && (
         <Overlay>
-          <h1 className="text-6xl font-black">{t("host.results")}</h1>
-          <ol className="w-full max-w-xl space-y-2">
+          <h1 className="text-6xl font-black">{t("host.resultsTitle", { race: host.raceNo })}</h1>
+          <ol className="w-full max-w-2xl space-y-2">
             {host.results.map((r, i) => {
               const p = byPid.get(r.pid);
               return (
@@ -346,14 +434,64 @@ export default function HostApp() {
                   <span className="w-10 text-3xl">{["🥇", "🥈", "🥉"][i] ?? i + 1}</span>
                   <span className="h-5 w-5 rounded-full" style={{ background: p?.color }} />
                   <span>{p?.name ?? t("host.leftRoom")}</span>
+                  {tag(r.pid)}
                   <span className="ml-auto font-mono text-xl opacity-80">{r.ms !== null ? (r.ms / 1000).toFixed(2) + "s" : t("host.dnf")}</span>
+                  <span className="w-16 text-right text-green-300">+{host.racePoints(r.pid)}</span>
+                  <span className="w-16 text-right">{host.scores[r.pid] ?? 0}</span>
                 </li>
               );
             })}
           </ol>
+          <div className="text-4xl font-black opacity-80">{secs}</div>
+        </Overlay>
+      )}
+
+      {phase === "vote" && (
+        <Overlay>
+          <h1 className="text-7xl font-black" style={{ color: "var(--traitor)" }}>{t("host.voteTitle")}</h1>
+          <p className="text-3xl">📱 {t("host.voteSub", { n: host.progress.n, of: host.progress.of })}</p>
+          <ClueList clues={host.clues} name={(pid) => host.name(pid)} />
+          <div className="text-6xl font-black opacity-80">{secs > 0 ? secs : "…"}</div>
+        </Overlay>
+      )}
+
+      {phase === "reveal" && host.voteResult && (
+        <Overlay>
+          {host.voteResult.caught ? (
+            <>
+              <div className="h-24 w-24 rounded-full" style={{ background: byPid.get(host.voteResult.caught)?.color }} />
+              <h1 className="text-center text-7xl font-black" style={{ color: host.voteResult.traitor ? "var(--traitor)" : "var(--racer)" }}>
+                {t(host.voteResult.traitor ? "reveal.caughtTraitor" : "reveal.innocent", { name: host.name(host.voteResult.caught) })}
+              </h1>
+            </>
+          ) : (
+            <h1 className="max-w-4xl text-center text-6xl font-black">{t("reveal.nobody")}</h1>
+          )}
+        </Overlay>
+      )}
+
+      {phase === "podium" && (
+        <Overlay>
+          <h1 className="text-6xl font-black">{t("podium.title")}</h1>
+          <ol className="w-full max-w-2xl space-y-2">
+            {scoreboard.map((p, i) => (
+              <li key={p.pid} className="flex items-center gap-4 rounded-xl bg-white/10 p-3 font-bold" style={{ fontSize: i < 3 ? 32 : 24 }}>
+                <span className="w-12">{["🥇", "🥈", "🥉"][i] ?? i + 1}</span>
+                <span className="h-5 w-5 rounded-full" style={{ background: p.color }} />
+                <span>{p.name}</span>
+                {tag(p.pid)}
+                <span className="ml-auto font-mono">{host.scores[p.pid] ?? 0}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-3xl font-bold" style={{ color: "var(--traitor)" }}>
+            {host.knownTraitors.size === 0
+              ? t("podium.noTraitors")
+              : t(host.knownTraitors.size > 1 ? "podium.traitors" : "podium.traitor", { names: [...host.knownTraitors].map((p) => host.name(p)).join(", ") })}
+          </p>
           <div className="flex gap-4">
             <button onClick={() => host.start()} className="rounded-2xl px-8 py-4 text-2xl font-black text-black" style={{ background: "var(--racer)" }}>
-              {t("race.raceAgain")}
+              {t("race.playAgain")}
             </button>
             <button onClick={() => host.backToLobby()} className="rounded-2xl border-2 px-8 py-4 text-2xl font-bold" style={{ borderColor: "var(--racer)" }}>
               {t("host.lobby")}
@@ -377,6 +515,66 @@ export default function HostApp() {
         />
       )}
     </main>
+  );
+}
+
+function Settings({ s, set }: { s: MatchSettings; set: (p: Partial<MatchSettings>) => void }) {
+  const row = <T,>(label: string, value: T, opts: [T, string][], pick: (v: T) => void) => (
+    <div className="flex items-center gap-2">
+      <span className="w-32 text-right text-lg opacity-70">{label}</span>
+      {opts.map(([v, text]) => (
+        <button
+          key={String(v)}
+          onClick={() => pick(v)}
+          className="rounded-lg px-4 py-1 text-lg font-bold"
+          style={v === value ? { background: "var(--racer)", color: "black" } : { background: "rgba(255,255,255,0.1)" }}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <section className="flex flex-col gap-2">
+      {row(t("settings.races"), s.races, [[1, "1"], [3, "3"], [5, "5"]] as [MatchSettings["races"], string][], (races) => set({ races }))}
+      {row(t("settings.traitors"), s.traitors, [[0, t("settings.auto")], [1, "1"], [2, "2"]] as [MatchSettings["traitors"], string][], (traitors) => set({ traitors }))}
+      {row(t("settings.cards"), s.cards, [[1, "1"], [2, "2"]] as [MatchSettings["cards"], string][], (cards) => set({ cards }))}
+      {row(t("settings.bots"), s.bots, [[true, t("settings.on")], [false, t("settings.off")]], (bots) => set({ bots }))}
+      {row(t("settings.track"), s.track, [["mix", t("settings.mix")], ...TRACKS.map((id) => [id, t(`track.${id}` as StringKey)] as [string, string])], (track) => set({ track }))}
+    </section>
+  );
+}
+
+function ClueList({ clues, name }: { clues: Clue[]; name: (pid: string) => string }) {
+  if (clues.length === 0) return null;
+  return (
+    <ul className="grid max-w-4xl grid-cols-1 gap-2 text-2xl sm:grid-cols-2">
+      {clues.map((c, i) => (
+        <li key={i} className="rounded-xl bg-white/10 px-4 py-2">{clueText(c, name)}</li>
+      ))}
+    </ul>
+  );
+}
+
+/** Phone reactions float up from the bottom of the TV and fade (3 s). */
+function Reactions({ host, byPid, u }: { host: RaceHost; byPid: Map<string, PlayerInfo>; u: number }) {
+  const now = performance.now();
+  const live = host.reactions.filter((r) => now - r.atMs < 3000);
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 overflow-hidden">
+      {live.map((r) => (
+        <div
+          key={r.id}
+          className="reaction absolute bottom-0 flex flex-col items-center"
+          style={{ left: `${15 + ((r.id * 37) % 60)}%`, fontSize: 64 * u }}
+        >
+          <span>{REACTIONS[r.e]}</span>
+          <span className="rounded-full px-2 font-bold" style={{ fontSize: 14 * u, background: byPid.get(r.pid)?.color, color: "black" }}>
+            {byPid.get(r.pid)?.name}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

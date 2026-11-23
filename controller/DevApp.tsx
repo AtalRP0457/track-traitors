@@ -128,6 +128,7 @@ export default function DevApp() {
               <th>name</th>
               <th>status</th>
               <th>phase</th>
+              <th>role</th>
               <th>steer</th>
               <th>rtt</th>
               <th>touch→TV</th>
@@ -144,6 +145,7 @@ export default function DevApp() {
                 </td>
                 <td className={v.status.startsWith("error") ? "text-red-400" : ""}>{v.status}</td>
                 <td>{v.phase}</td>
+                <td style={{ color: v.role === "traitor" ? "var(--traitor)" : undefined }}>{v.role ?? "–"}</td>
                 <td>{v.steer === -1 ? "◀" : v.steer === 1 ? "▶" : "·"}</td>
                 <td>{v.rtt === null ? "–" : `${Math.round(v.rtt)} ms`}</td>
                 <td>{v.tt === null ? "–" : `${Math.round(v.tt)} ms`}</td>

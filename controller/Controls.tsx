@@ -8,7 +8,7 @@ import { t } from "@/shared/strings";
  * lights up instantly before anything goes over the network.
  * onSteer is called only when the steering value actually changes.
  */
-export default function Controls({ color, onSteer }: { color: string; onSteer: (s: -1 | 0 | 1, at: number) => void }) {
+export default function Controls({ color, onSteer, bottom = 0 }: { color: string; onSteer: (s: -1 | 0 | 1, at: number) => void; bottom?: number }) {
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const down = useRef({ left: new Set<number>(), right: new Set<number>() });
@@ -84,7 +84,7 @@ export default function Controls({ color, onSteer }: { color: string; onSteer: (
 
   const half = "flex flex-1 items-center justify-center text-8xl font-black transition-none";
   return (
-    <div className="absolute inset-0 flex gap-2 p-2 pt-14">
+    <div className="absolute inset-0 flex gap-2 p-2 pt-14" style={{ paddingBottom: 8 + bottom }}>
       <div ref={leftRef} className={half + " rounded-3xl"} style={{ background: "rgba(255,255,255,0.08)", touchAction: "none" }} aria-label={t("phone.steerLeft")}>
         ◀
       </div>

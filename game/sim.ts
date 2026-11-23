@@ -1,7 +1,9 @@
 // Race simulation. Fixed 60 Hz step, deterministic for the same inputs, no Phaser.
-// The host is the referee: only this code decides positions, laps and finish order.
+// The host is the referee: only this code decides positions, laps, finish order and which
+// trap a car touched.
 
-import { pointAt, project, type Track } from "./track";
+import { HARMFUL, type Card } from "../shared/rules";
+import { bridgeAt, indexAt, pointAt, project, roadHalf, surfaceAt, type Track } from "./track";
 
 export const DT = 1 / 60;
 
@@ -16,8 +18,31 @@ export const TUNING = {
   maxStepProgress: 40,
   /** Off the road this long → respawn where the car left it, facing the right way. */
   respawnTicks: 120,
+  /** Off a bridge = in the water: respawn much sooner. */
+  splashTicks: 30,
   /** After a respawn the car can't be bumped for this long, so it isn't knocked straight back off. */
   ghostTicks: 60,
+  /** Speed multipliers on special ground (on the road). */
+  sandSpeed: 0.85,
+  waterSpeed: 0.55,
+  /** Last place (of the cars still racing) gets slightly higher top speed. */
+  catchUp: 1.06,
+  /** A car touches a trap when its center is this close. */
+  trapRadius: 22,
+};
+
+/** Effect lengths in ticks (60 = 1 s). */
+export const FX = {
+  spin: 48, // oil: one full spin, no steering
+  stun: 30, // crab wall / coconut: stopped, no steering
+  knockback: 70, // coconut: px pushed back along the track
+  slow: 90, // fake boost
+  slowCap: 0.45,
+  boost: 72,
+  boostCap: 1.5,
+  air: 42, // ramp: no steering, no bumps
+  airCap: 1.15,
+  glitch: 120, // reversed steering
 };
 
 export interface Car {
@@ -40,6 +65,22 @@ export interface Car {
   offDist: number;
   /** Ticks left of post-respawn ghosting (no collisions). */
   ghost: number;
+  /** Ticks left of each effect. */
+  spin: number;
+  stun: number;
+  slow: number;
+  boost: number;
+  air: number;
+  glitch: number;
+}
+
+export interface Trap {
+  id: number;
+  card: Card;
+  x: number;
+  y: number;
+  /** false once a car has set it off (then the host draws it). */
+  live: boolean;
 }
 
 export interface RaceState {
@@ -47,8 +88,11 @@ export interface RaceState {
   laps: number;
   cars: Car[];
   tick: number;
+  traps: Trap[];
   /** Cars put back on the road this tick (for the host's "back on track" effect). */
   respawned: string[];
+  /** Traps set off this tick. */
+  hits: { trap: number; pid: string }[];
 }
 
 export function createRace(track: Track, pids: string[], laps: number): RaceState {
@@ -58,9 +102,9 @@ export function createRace(track: Track, pids: string[], laps: number): RaceStat
     const p = project(track, x, y);
     // Grid slots sit behind the start line, so their distance is negative.
     const dist = p.s > L / 2 ? p.s - L : p.s;
-    return { pid, x, y, a, v: 0, steer: 0, dist, seg: p.i, cp: 0, lap: 0, finishMs: null, offTicks: 0, offDist: dist, ghost: 0 } as Car;
+    return { pid, x, y, a, v: 0, steer: 0, dist, seg: p.i, cp: 0, lap: 0, finishMs: null, offTicks: 0, offDist: dist, ghost: 0, spin: 0, stun: 0, slow: 0, boost: 0, air: 0, glitch: 0 } as Car;
   });
-  return { track, laps, cars, tick: 0, respawned: [] };
+  return { track, laps, cars, tick: 0, traps: [], respawned: [], hits: [] };
 }
 
 /** Unwrapped distance of the k-th checkpoint in driving order. */
@@ -73,42 +117,103 @@ export function raceMs(r: RaceState): number {
   return Math.round((r.tick * 1000) / 60);
 }
 
-/** Put a car back on the centerline at progress `dist`, pointing along the track, stopped. */
-export function respawn(r: RaceState, c: Car, dist: number) {
+/** Put a car on the centerline at progress `dist`, pointing along the track. */
+function placeOnLine(r: RaceState, c: Car, dist: number) {
   const p = pointAt(r.track, dist);
   c.x = p.x;
   c.y = p.y;
   c.a = p.a;
-  c.v = 0;
   c.dist = dist;
-  c.seg = project(r.track, p.x, p.y).i;
+  c.seg = indexAt(r.track, dist); // not project(): at a crossing that could pick the other branch
   c.offTicks = 0;
   c.offDist = dist;
+}
+
+/** Put a car back on the centerline at progress `dist`, pointing along the track, stopped. */
+export function respawn(r: RaceState, c: Car, dist: number) {
+  placeOnLine(r, c, dist);
+  c.v = 0;
+  c.spin = c.air = 0;
   c.ghost = TUNING.ghostTicks;
   r.respawned.push(c.pid);
+}
+
+/** Apply a trap's effect to a car. */
+export function applyTrap(r: RaceState, c: Car, card: Card) {
+  switch (card) {
+    case "oil":
+      c.spin = FX.spin;
+      c.v *= 0.5;
+      break;
+    case "crab":
+      c.v = 0;
+      c.stun = FX.stun;
+      break;
+    case "coconut":
+      // Knocked back along the track (progress goes back too, so nothing is gained or lost unfairly).
+      placeOnLine(r, c, Math.max(c.dist - FX.knockback, c.dist - 200));
+      c.v = 0;
+      c.stun = FX.stun;
+      c.spin = FX.spin / 2;
+      break;
+    case "fake":
+      c.slow = FX.slow;
+      c.v *= 0.5;
+      break;
+    case "boost":
+      c.boost = FX.boost;
+      c.v = Math.max(c.v, TUNING.maxSpeed * 1.3);
+      break;
+    case "ramp":
+      c.air = FX.air;
+      break;
+  }
+}
+
+/** Last place among cars still racing (only when 2+ are racing). */
+function lastPlace(r: RaceState): Car | null {
+  const racing = r.cars.filter((c) => c.finishMs === null);
+  if (racing.length < 2) return null;
+  return racing.reduce((a, b) => (b.dist < a.dist ? b : a));
 }
 
 /** Advance one fixed step. Returns pids that completed a lap this tick. */
 export function step(r: RaceState): string[] {
   const { track } = r;
   const L = track.length;
-  const half = track.def.width / 2;
   const lapped: string[] = [];
   r.tick++;
   r.respawned = [];
+  r.hits = [];
+  const last = lastPlace(r);
 
   for (const c of r.cars) {
     const done = c.finishMs !== null;
     const proj = project(track, c.x, c.y, c.seg);
-    const onRoad = proj.off <= half;
-    const target = done ? TUNING.maxSpeed * 0.5 : onRoad ? TUNING.maxSpeed : TUNING.grassSpeed;
+    const half = roadHalf(track, proj.s);
+    const onRoad = proj.off <= half || c.air > 0;
+
+    let target = done ? TUNING.maxSpeed * 0.5 : onRoad ? TUNING.maxSpeed : TUNING.grassSpeed;
+    if (onRoad && !done) {
+      const ground = c.air > 0 || bridgeAt(track, proj.s) ? "road" : surfaceAt(track, c.x, c.y);
+      if (ground === "sand") target *= TUNING.sandSpeed;
+      if (ground === "water") target *= TUNING.waterSpeed;
+      if (c === last) target *= TUNING.catchUp;
+      if (c.boost > 0) target = TUNING.maxSpeed * FX.boostCap;
+      if (c.air > 0) target = Math.max(target, TUNING.maxSpeed * FX.airCap);
+    }
+    if (c.slow > 0) target = Math.min(target, TUNING.maxSpeed * FX.slowCap);
+    if (c.spin > 0) target = Math.min(target, TUNING.maxSpeed * 0.3);
+    if (c.stun > 0) target = 0;
 
     if (c.v < target) c.v = Math.min(target, c.v + TUNING.accel * DT);
     else c.v = Math.max(target, c.v - (onRoad ? TUNING.accel : TUNING.grassDrag) * DT);
 
-    // Finished cars steer themselves gently along the road.
-    const steer = done ? autoSteer(r, c) : c.steer;
-    c.a += steer * TUNING.turnRate * DT * Math.min(1, c.v / 120);
+    // Finished cars steer themselves gently along the road. Glitch reverses the buttons.
+    let steer = done ? autoSteer(r, c) : c.steer;
+    if (c.glitch > 0) steer = -steer as -1 | 0 | 1;
+    if (c.spin > 0) c.a += (Math.PI * 2) / FX.spin; // one full turn, ends facing the same way
+    else if (c.stun === 0 && c.air === 0) c.a += steer * TUNING.turnRate * DT * Math.min(1, c.v / 120);
     c.x += Math.cos(c.a) * c.v * DT;
     c.y += Math.sin(c.a) * c.v * DT;
 
@@ -128,12 +233,25 @@ export function step(r: RaceState): string[] {
     if (Math.abs(d) <= TUNING.maxStepProgress) c.dist += d;
     c.seg = np.i;
 
+    for (const k of ["spin", "stun", "slow", "boost", "air", "glitch", "ghost"] as const) if (c[k] > 0) c[k]--;
+
     // Off the road: remember where it left; after 2 s put it back there, facing the right way.
-    if (c.ghost > 0) c.ghost--;
-    if (np.off > half + TUNING.carRadius) {
+    // Off a bridge means in the water, so that's quicker.
+    if (c.air === 0 && np.off > roadHalf(track, np.s) + TUNING.carRadius) {
       if (c.offTicks === 0) c.offDist = c.dist;
-      if (++c.offTicks >= TUNING.respawnTicks) respawn(r, c, c.offDist);
+      const limit = bridgeAt(track, ((c.offDist % L) + L) % L) ? TUNING.splashTicks : TUNING.respawnTicks;
+      if (++c.offTicks >= limit) respawn(r, c, c.offDist);
     } else c.offTicks = 0;
+
+    // Traps: the first car to touch one sets it off. Airborne cars fly over.
+    if (c.air === 0 && !done) {
+      for (const t of r.traps) {
+        if (!t.live || Math.hypot(t.x - c.x, t.y - c.y) > TUNING.trapRadius + TUNING.carRadius) continue;
+        t.live = false;
+        applyTrap(r, c, t.card);
+        r.hits.push({ trap: t.id, pid: c.pid });
+      }
+    }
 
     // Checkpoints only count in order; a lap is done when checkpoint 0 comes round again.
     while (c.dist >= cpDist(track, c.cp)) c.cp++;
@@ -152,6 +270,9 @@ export function step(r: RaceState): string[] {
   return lapped;
 }
 
+/** A harmful trap's hit counts as a "crash". */
+export const isCrash = (card: Card) => HARMFUL.has(card);
+
 function autoSteer(r: RaceState, c: Car): -1 | 0 | 1 {
   const ahead = pointAt(r.track, (c.dist % r.track.length) + 60);
   let diff = Math.atan2(ahead.y - c.y, ahead.x - c.x) - c.a;
@@ -164,7 +285,7 @@ function collide(cars: Car[]) {
   for (let i = 0; i < cars.length; i++) {
     for (let j = i + 1; j < cars.length; j++) {
       const a = cars[i], b = cars[j];
-      if (a.ghost > 0 || b.ghost > 0) continue;
+      if (a.ghost > 0 || b.ghost > 0 || a.air > 0 || b.air > 0) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const d2 = dx * dx + dy * dy;
       if (d2 >= min * min || d2 === 0) continue;

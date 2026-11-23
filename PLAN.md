@@ -163,6 +163,8 @@ Phase 1 also uses these (see `shared/protocol.ts` for the exact types):
 {"v":1,"t":"error","code":"full","msg":"..."}                 // room → one connection
 ```
 
+Phase 2 (exact types in `shared/protocol.ts`): `match` (host → room: settings + bot seats; room deals roles), `seats` (room → phones: bot seats), `progress` (room → host: n/of phones done drafting or voting), `mytraps` (room → one phone: its own placed traps), `glitchok` / `glitched` (room → the traitor / the target phone), `voteend` (host → room: close the vote), `voteresult` (room → all: caught pid + whether a traitor), `scores` (room → all: match totals), `reveal` (room → all at the podium: every traitor), `react` (phone → room → host, rate-limited). `phase` also carries `race`, `races`, `track`, `ms` and (for votes) `clues`. Phases: lobby → role → (draft → countdown → race → results → [vote → reveal]) × races → podium.
+
 **Touch → TV measurement:** the phone numbers each input (`k`) and remembers when the finger touched. The host acks `k` right after drawing the frame that used it. Phone computes `ack arrival − touch time − RTT/2` and reports it with `stat`. The host debug panel (key **D**) shows p50/p95.
 
 Switch to binary (MessagePack) only if size becomes a measured problem.
@@ -301,33 +303,34 @@ Do not start a phase until the previous gate passes.
 | **6. iPhone + Discord** | iOS build (Codemagic), local-network permission text, Game Center, Discord Activity | Approved on App Store |
 | **7. Community** | Track editor, weekly track, Daily Track, leaderboards with anti-cheat, moderation | Weekly track played by 20%+ of active players |
 
-### Phase 2 build steps (status 2026-11-21)
-
-Each step = one commit, testable alone with the /dev fake phones (they learn to place cards and vote along the way).
+### Phase 2 build steps (status 2026-11-23)
 
 | Step | What | Main files | Status |
 |---|---|---|---|
-| 5b | Full-window host screen + broadcast camera | `game/camera.ts`, `game/hud.ts`, `game/scene.ts` | **Done** (`8b3dc49`) |
-| A | 3-race match, score board, podium; host settings (races 1/3/5, traitors auto/1/2, cards per player 1/2, bots on/off) | `game/race.ts` → split out `game/match.ts`, `party/core.ts`, HostApp | Next |
-| B | Secret roles: room assigns, each phone gets only its own (traitors see each other); 5 s role card | `party/core.ts`, `shared/protocol.ts`, PhoneApp | |
-| C | Trap draft (20 s, 3 cards, tap the minimap → snaps into a trap zone); room keeps owners, host gets positions only (`traps`); host detects triggers, applies the effect, shows the hit banner + trap-cut camera, sends `hit` | new `game/traps.ts`, `controller/Draft.tsx`, core, sim | |
-| D | Glitch: traitor reverses one rival's steering for 2 s, once per race; static flash on the TV, never who | core, sim, `controller/Controls.tsx` | |
-| E | Vote after races 2 and 3 (20 s) with clues from the last race; scoring | core, `controller/Vote.tsx`, HostApp | |
-| F | Bots fill empty seats; fake phones place cards and vote | `game/bot.ts`, `controller/fakePhone.ts` | |
-| G | Coconut Harbor (narrow one-car bridges) + Lagoon Figure-8 (crossing, shallow water) | track JSONs, sim surfaces/hazards | |
-| H | Reactions (6 fixed emoji buttons → float up on the TV) + catch-up (last place gets slightly higher top speed) | PhoneApp, HostApp, sim | |
+| 5b | Full-window host screen + broadcast camera | `game/camera.ts`, `game/hud.ts`, `game/scene.ts` | **Done** (`8b3dc49`); camera keeps every racing car in frame + off-track respawn (2026-11-23) |
+| A | Match of 1/3/5 races, results + score board, podium; host settings (races, traitors auto/1/2, traps each 1/2, bots on/off, track or Mix) | `game/race.ts` (match flow), `shared/rules.ts`, `party/core.ts`, HostApp | **Done** |
+| B | Secret roles: room assigns, each phone gets only its own (traitors see each other); 5 s role card | `party/core.ts`, `controller/MatchScreens.tsx` | **Done** |
+| C | Trap draft (20 s, 3 cards, tap the minimap → snaps into a trap zone); room keeps owners, host gets shuffled positions only (`traps`) and re-snaps them; host detects triggers, applies the effect, shows the hit banner + trap-cut camera, sends `hit` | `game/traps.ts`, `game/sim.ts`, `controller/MatchScreens.tsx`, core | **Done** |
+| D | Glitch: traitor reverses one rival's steering for 2 s, once per race; static flash on the TV, never who | core, sim, PhoneApp | **Done** |
+| E | Vote after races 2+ (20 s, ends early when all voted) with clues from the last race; scoring | core, `controller/MatchScreens.tsx`, HostApp | **Done** |
+| F | Bots fill empty seats; dropped phones are driven by the bot brain; fake phones place cards, vote and glitch | `game/race.ts`, `controller/fakePhone.ts` | **Done** |
+| G | Coconut Harbor (two one-car bridges, 0.5 s splash respawn off them) + Lagoon Figure-8 (crossing, shallow water patch slows) | track JSONs, `game/track.ts` (bridges, surfaces), sim, `scripts/build-track-images.ts` | **Done** |
+| H | Reactions (6 fixed emoji buttons on phones between races → float up on the TV, max 1 per 0.4 s) + catch-up (last place +6% top speed) | PhoneApp, HostApp, sim, core | **Done** |
 
-### Phase 2 open decisions (PROPOSED — not yet decided; confirm before step A)
+### Phase 2 decisions (confirmed 2026-11-23)
 
-| # | Question | Proposal |
+| # | Question | Decision |
 |---|---|---|
-| 1 | Can racers draw harmful cards? | Yes. Everyone draws 3 random cards from all 6, so a harmful trap proves nothing and racers can use traps to beat rivals |
-| 2 | Scoring numbers | Race places 10/8/6/5/4/3/2/1. Traitor: +3 per crash their trap causes (on someone else). Traitor surviving a vote: +5. Caught traitor: −5. Wrongly accused racer: +2 |
-| 3 | Vote rules | Majority of votes catches a player; tie = nobody caught; skipping is allowed. A caught traitor is revealed, keeps racing, but loses Glitch |
-| 4 | Bots in Traitors mode | Bots fill seats up to 3 players; bots are always racers and don't vote |
-| 5 | Draft timing | A new trap draft before every race (not once per match) |
+| 1 | Can racers draw harmful cards? | Yes. Everyone draws 3 different random cards from all 6, so a harmful trap proves nothing and racers can use traps to beat rivals |
+| 2 | Scoring numbers | Race places 10/8/6/5/4/3/2/1. Traitor: +3 per crash their harmful trap (oil, crab, coconut, fake boost) causes on someone else. Every hidden traitor surviving a vote: +5. Caught traitor: −5. Wrongly accused racer: +2 |
+| 3 | Vote rules | Plurality: the most-voted player is caught; skip counts as an option; a tie for the most (or skip winning) = nobody caught. You can't vote yourself, bots, or an already-caught traitor. A caught traitor is revealed (orange on the TV), keeps racing, but loses Glitch. Votes after every race from race 2 on (and after the only race of a 1-race match) |
+| 4 | Bots in Traitors mode | Bots fill seats up to 3 racers (setting, default on); bots are always racers, don't vote, can be glitched, score race points |
+| 5 | Draft timing | A new trap draft before every race (not once per match). Cards each player places per race: setting 1 (default) or 2 |
+| 6 | Traitor count | Auto = 1 for up to 5 seats, 2 for 6–8 (seats include bots). Always at least one phone stays a racer when 2+ phones play; a single phone can be the traitor (solo testing) |
+| 7 | Trap effects | Oil: one full spin, no steering. Crab wall: stopped dead 0.5 s. Coconut: knocked back 70 px, stopped, half spin. Fake boost: top speed 45% for 1.5 s. Boost pad: 150% for 1.2 s. Ramp: 0.7 s airborne (no steering, no bumps, flies over traps). Traps are one-shot and appear on the TV only once set off |
+| 8 | Clues before a vote | Public facts only: who hit how many harmful traps, who hit none, who got glitched, how many traps never went off. Never who placed anything |
 
-Also still open: the Phase 1 gate (4 real phones, touch→TV < 120 ms) has not been measured on real devices yet; Phase 2 work started anyway by decision on 2026-11-21.
+Also still open: the Phase 1 gate (4 real phones, touch→TV < 120 ms) has not been measured on real devices yet; Phase 2 work started anyway by decision on 2026-11-21. The Phase 2 gate (7 of 10 test groups play 3+ matches in a row) needs real playtests.
 
 ---
 

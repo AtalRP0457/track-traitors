@@ -142,5 +142,15 @@
   "phone.score": "{n} pts",
   "phone.watchTv": "Watch the TV!",
   "phone.youWereTraitor": "You were the traitor 😈",
-  "phone.overall": "{n} overall"
+  "phone.overall": "{n} overall",
+  "track.sandcastle-circuit": "Sandcastle Circuit",
+  "track.jungle-switchback": "Jungle Switchback",
+  "track.volcano-rim": "Volcano Rim",
+  "track.boardwalk-night-market": "Boardwalk Night Market",
+  "track.mirrorName": "{name} (Mirror)",
+  "settings.mirror": "Mirror",
+  "settings.mirrorMix": "Mix",
+  "settings.beginner": "first-timers",
+  "hit.lava": "🌋 LAVA! {name} got scorched!",
+  "hit.crabs": "🦀 CRAB CROSSING! {name} got stuck in the crowd!"
 }

@@ -8,7 +8,7 @@ import { COUNTDOWN_MS, LAPS, CAR_COLORS } from "../shared/constants";
 import { randomName } from "../shared/names";
 import type { AnyMsg, BotInfo, Clue, LobbyMsg, Phase, PlayerInfo } from "../shared/protocol";
 import {
-  DEFAULT_SETTINGS, DRAFT_MS, HARMFUL, isCard, MIN_RACERS, PLACE_POINTS, REVEAL_MS, RESULTS_MS, ROLE_MS, trackForRace, VOTE_MS, voteAfter,
+  DEFAULT_SETTINGS, DRAFT_MS, HARMFUL, isCard, matchTracks, MIN_RACERS, PLACE_POINTS, REVEAL_MS, RESULTS_MS, ROLE_MS, VOTE_MS, voteAfter,
   type Card, type MatchSettings,
 } from "../shared/rules";
 import type { StringKey } from "../shared/strings";
@@ -58,6 +58,12 @@ export class RaceHost {
   reactions: Reaction[] = [];
   /** Tick until which the TV shows glitch static. */
   glitchFlash = 0;
+  /** Matches finished on this host device (from storage; the ads rule and the beginner track use it). */
+  matchesPlayed = 0;
+  /** Called when a match reaches the podium. */
+  onMatchDone?: () => void;
+  /** Track id for each race of the current match. */
+  trackPlan: string[] = [];
 
   /** Latest input per player; applied on the next physics tick. */
   private inputs = new Map<string, { s: -1 | 0 | 1; k: number }>();
@@ -89,6 +95,8 @@ export class RaceHost {
   afterTick?: () => void;
   /** Called when a harmful trap goes off at (x, y): the scene cuts the camera there. */
   onTrapCut?: (x: number, y: number) => void;
+  /** A lava crack or crab crowd got a car (for sound). */
+  onHazard?: (kind: "lava" | "crabs") => void;
   /** Loads a track by id (fetch + build). Without it every race uses the current track. */
   loadTrack?: (id: string) => Promise<Track>;
   /** Per-match numbers for analytics. */
@@ -104,6 +112,12 @@ export class RaceHost {
   /** Everyone with a car: phones, then bots. */
   get roster(): PlayerInfo[] {
     return [...this.players, ...this.bots];
+  }
+
+  /** Car number shown on the roof, the positions tower and the phone (1-based seat order). */
+  carNumber(pid: string): number {
+    const i = this.roster.findIndex((p) => p.pid === pid);
+    return i < 0 ? 0 : i + 1;
   }
 
   name(pid: string): string {
@@ -215,9 +229,10 @@ export class RaceHost {
     this.results = [];
     this.race = null;
     this.stat = { stats: [], fps: [], disconnects: 0 };
+    this.trackPlan = matchTracks(this.match, this.match.races, this.matchesPlayed === 0);
     const bots: BotInfo[] = this.bots.map(({ pid, name, color }) => ({ pid, name, color }));
     this.send({ v: 1, t: "match", settings: this.match, bots });
-    this.log({ e: "match_started", track: trackForRace(this.match, 1), players: this.roster.length });
+    this.log({ e: "match_started", track: this.trackPlan[0], players: this.roster.length });
     this.setPhase("role", ROLE_MS);
   }
 
@@ -250,7 +265,7 @@ export class RaceHost {
     this.voteResult = null;
     this.clues = [];
     this.progress = { n: 0, of: this.players.length };
-    const id = trackForRace(this.match, this.raceNo);
+    const id = this.trackPlan[this.raceNo - 1] ?? this.trackPlan[0];
     if (this.loadTrack && this.track?.def.id !== id) {
       this.loading = id;
       this.loadTrack(id)
@@ -315,8 +330,10 @@ export class RaceHost {
   }
 
   private afterRace() {
-    if (this.raceNo < this.match.races) this.nextRace();
-    else this.setPhase("podium");
+    if (this.raceNo < this.match.races) return this.nextRace();
+    this.matchesPlayed++;
+    this.onMatchDone?.();
+    this.setPhase("podium");
   }
 
   private makeClues(): Clue[] {
@@ -389,6 +406,12 @@ export class RaceHost {
       this.raceLog.hits.push({ card: trap.card, pid: h.pid });
       this.banner = { key: `hit.${trap.card}` as StringKey, vars: { name: this.name(h.pid) }, tick: r.tick };
       if (HARMFUL.has(trap.card)) this.onTrapCut?.(trap.x, trap.y);
+    }
+
+    // Lava cracks and crab crowds: public, so the TV says who got caught.
+    for (const h of r.hazardHits) {
+      this.banner = { key: h.kind === "lava" ? "hit.lava" : "hit.crabs", vars: { name: this.name(h.pid) }, tick: r.tick };
+      this.onHazard?.(h.kind);
     }
 
     // A respawned car jumps; don't draw it gliding across the map.

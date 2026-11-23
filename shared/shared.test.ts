@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CODE_ALPHABET, isValidCode, randomCode } from "./constants";
 import { isListName, randomName } from "./names";
 import { parseMsg, type ErrorMsg } from "./protocol";
-import { ordinal, t } from "./strings";
+import { ordinal, t, trackName } from "./strings";
+import { BEGINNER_TRACK, DEFAULT_SETTINGS, matchTracks, TRACKS } from "./rules";
 import en from "../strings/en.json";
 
 describe("room codes", () => {
@@ -45,5 +46,25 @@ describe("strings", () => {
   it("has a text for every room error code", () => {
     const codes: ErrorMsg["code"][] = ["no_room", "full", "started", "taken", "bad_seat", "closed"];
     for (const code of codes) expect((en as Record<string, string>)[`error.${code}`]).toBeTruthy();
+  });
+});
+
+describe("match tracks", () => {
+  const base = { ...DEFAULT_SETTINGS, races: 5 as const };
+  it("a brand-new host starts on the walled beginner track, never mirrored", () => {
+    for (let i = 0; i < 20; i++) expect(matchTracks({ ...base, mirror: "mix" }, 5, true)[0]).toBe(BEGINNER_TRACK);
+  });
+  it("mix uses different tracks before repeating", () => {
+    const list = matchTracks(base, 5, false);
+    expect(new Set(list).size).toBe(5);
+    list.forEach((id) => expect(TRACKS).toContain(id));
+  });
+  it("a chosen track is used every race; Mirror on flips them all", () => {
+    expect(matchTracks({ ...base, track: "volcano-rim" }, 3, true)).toEqual(["volcano-rim", "volcano-rim", "volcano-rim"]);
+    expect(matchTracks({ ...base, track: "volcano-rim", mirror: "on" }, 2, false)).toEqual(["volcano-rim~m", "volcano-rim~m"]);
+  });
+  it("names Mirror versions", () => {
+    expect(trackName("volcano-rim~m")).toBe("Volcano Rim (Mirror)");
+    expect(trackName("sandcastle-circuit")).toBe("Sandcastle Circuit");
   });
 });

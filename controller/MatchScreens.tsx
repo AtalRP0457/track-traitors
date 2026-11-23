@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CARD_ICON, REACTIONS, type Card, type Role } from "@/shared/rules";
 import { t, type StringKey } from "@/shared/strings";
-import { trackUrl, parseTrack } from "@/shared/track-format";
+import { fetchTrackFile } from "@/shared/track-format";
 import type { Clue } from "@/shared/protocol";
 import { clueText } from "@/shared/clues";
 import { buildTrack, type Track } from "@/game/track";
@@ -54,9 +54,8 @@ function useTrack(id: string): Track | null {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    fetch(trackUrl(id))
-      .then((r) => r.json())
-      .then((raw) => !cancelled && setTrack(buildTrack(parseTrack(raw))))
+    fetchTrackFile(id)
+      .then((def) => !cancelled && setTrack(buildTrack(def)))
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -117,7 +116,14 @@ export function Draft({ trackId, cards, n, mine, endAt, onPlace }: {
             onPointerDown={place}
             style={{ touchAction: "none" }}
           >
-            <image href={track.def.minimap} x={0} y={0} width={track.def.world.w} height={track.def.world.h} />
+            <image
+              href={track.def.minimap}
+              x={0}
+              y={0}
+              width={track.def.world.w}
+              height={track.def.world.h}
+              transform={track.def.mirror ? `translate(${track.def.world.w} 0) scale(-1 1)` : undefined}
+            />
             {zones.map((pts, i) => (
               <polyline
                 key={i}

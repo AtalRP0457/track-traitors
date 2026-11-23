@@ -342,6 +342,8 @@ export default function PhoneApp() {
   const canGlitch = traitor && !role?.caught && phase === "race" && !glitchUsed && lap < LAPS;
   const raceOf = info.race && info.races ? t("host.raceOf", { race: info.race, races: info.races }) : "";
   const myScore = scores[me.pid];
+  /** Same number as on my car and the TV's positions tower (seat order: phones, then bots). */
+  const carNo = lobby.players.findIndex((p) => p.pid === me.pid) + 1;
 
   if (inRace) {
     const left = Math.max(0, Math.ceil((countdownEnd - performance.now()) / 1000));
@@ -371,7 +373,9 @@ export default function PhoneApp() {
         )}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex h-14 items-center justify-between px-4 text-lg font-bold">
           <span className="flex items-center gap-2">
-            <span className="h-4 w-4 rounded-full" style={{ background: me.color }} />
+            <span className="flex h-6 w-6 items-center justify-center rounded-full text-sm font-black text-[#0b1d2a]" style={{ background: me.color }}>
+              {carNo}
+            </span>
             {me.name}
           </span>
           <span>{lap >= LAPS ? t("race.finished") : t("race.lap", { lap: Math.min(lap + 1, LAPS), laps: LAPS })}</span>

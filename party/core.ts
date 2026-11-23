@@ -225,6 +225,7 @@ export class RoomCore {
       cards: s.cards === 2 ? 2 : 1,
       bots: !!s.bots,
       track: typeof s.track === "string" ? s.track : "mix",
+      mirror: s.mirror === "on" || s.mirror === "mix" ? s.mirror : "off",
     };
     this.bots = (Array.isArray(m.bots) ? (m.bots as BotInfo[]) : [])
       .filter((b) => b && typeof b.pid === "string" && !this.players.has(b.pid))

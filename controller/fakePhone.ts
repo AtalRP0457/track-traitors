@@ -11,13 +11,13 @@ import { NetSim, type NetSimConfig } from "../shared/netsim";
 import { parseMsg, type AnyMsg, type Phase } from "../shared/protocol";
 import type { PartySocket } from "partysocket";
 import type { Card, Role } from "../shared/rules";
-import { parseTrack, trackUrl } from "../shared/track-format";
+import { fetchTrackFile } from "../shared/track-format";
 import { buildTrack, type Track } from "../game/track";
 import { snapTrap, trapZonePaths } from "../game/traps";
 
 const tracks = new Map<string, Promise<Track>>();
 function loadTrack(id: string): Promise<Track> {
-  if (!tracks.has(id)) tracks.set(id, fetch(trackUrl(id)).then((r) => r.json()).then((raw) => buildTrack(parseTrack(raw))));
+  if (!tracks.has(id)) tracks.set(id, fetchTrackFile(id).then(buildTrack));
   return tracks.get(id)!;
 }
 const pick = <T,>(xs: T[]): T => xs[Math.floor(Math.random() * xs.length)];

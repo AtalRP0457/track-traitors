@@ -4,8 +4,8 @@ import QRCode from "qrcode";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { analytics } from "@/shared/analytics";
 import { LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
-import { DEFAULT_SETTINGS, REACTIONS, TRACKS, trackForRace, type MatchSettings } from "@/shared/rules";
-import { t, type StringKey } from "@/shared/strings";
+import { BEGINNER_TRACK, DEFAULT_SETTINGS, previewTrack, REACTIONS, TRACKS, type MatchSettings, type MirrorSetting } from "@/shared/rules";
+import { t, trackName } from "@/shared/strings";
 import { clueText } from "@/shared/clues";
 import { openRoom, randomToken, send, store } from "@/shared/net";
 import { parseMsg, type AnyMsg, type Clue, type LobbyMsg, type PlayerInfo } from "@/shared/protocol";
@@ -13,21 +13,20 @@ import type { PartySocket } from "partysocket";
 import { Director } from "./camera";
 import { DevBotRelay } from "./devbots";
 import { percentile, RaceHost } from "./race";
-import { parseTrack, trackUrl } from "@/shared/track-format";
+import { fetchTrackFile } from "@/shared/track-format";
 import { buildTrack, type Track } from "./track";
 
 const HOST_KEY = "tt-host";
 const SETTINGS_KEY = "tt-settings";
+/** Completed matches on this host device (PLAN.md 6: ads rule; also picks the beginner track). */
+const MATCHES_KEY = "tt-matches";
 
 /** Fetch + build a track once per page; later races reuse it. */
 const trackCache = new Map<string, Promise<Track>>();
 function fetchTrack(id: string): Promise<Track> {
   let p = trackCache.get(id);
   if (!p) {
-    p = fetch(trackUrl(id)).then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return buildTrack(parseTrack(await res.json()));
-    });
+    p = fetchTrackFile(id).then(buildTrack);
     p.catch(() => trackCache.delete(id));
     trackCache.set(id, p);
   }
@@ -60,6 +59,8 @@ export default function HostApp() {
   if (!hostRef.current) {
     const h = new RaceHost(null, (m) => tx(m), rerender, analytics.log);
     h.settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<MatchSettings>>(SETTINGS_KEY) };
+    h.matchesPlayed = store.get<number>(MATCHES_KEY) ?? 0;
+    h.onMatchDone = () => store.set(MATCHES_KEY, h.matchesPlayed);
     h.loadTrack = fetchTrack;
     h.onTrapCut = (x, y) => director.trapHit(x, y, performance.now());
     hostRef.current = h;
@@ -159,9 +160,9 @@ export default function HostApp() {
     let cancelled = false;
     (async () => {
       try {
-        host.track = await fetchTrack(trackForRace(host.settings, 1));
+        host.track = await fetchTrack(previewTrack(host.settings, host.matchesPlayed === 0));
       } catch (e) {
-        setTrackError(t("host.trackError", { id: trackForRace(host.settings, 1), err: (e as Error).message }));
+        setTrackError(t("host.trackError", { id: previewTrack(host.settings, host.matchesPlayed === 0), err: (e as Error).message }));
         return;
       }
       const { createGame } = await import("./scene");
@@ -343,7 +344,7 @@ export default function HostApp() {
 
       {phase === "draft" && (
         <Overlay>
-          <div className="text-2xl uppercase tracking-widest opacity-70">{raceOf} · {host.track ? t(`track.${host.track.def.id}` as StringKey) : ""}</div>
+          <div className="text-2xl uppercase tracking-widest opacity-70">{raceOf} · {host.track ? trackName(host.track.def.id) : ""}</div>
           <h1 className="text-7xl font-black" style={{ color: "var(--traitor)" }}>{t("host.draftTitle")}</h1>
           <p className="text-3xl">{t("host.draftSub", { n: host.progress.n, of: host.progress.of })}</p>
           <div className="text-6xl font-black opacity-80">{secs > 0 ? secs : "…"}</div>
@@ -371,7 +372,9 @@ export default function HostApp() {
                 return (
                   <li key={c.pid} className="flex items-center" style={{ gap: 8 * u }}>
                     <span className="opacity-70" style={{ width: 24 * u }}>{i + 1}</span>
-                    <span className="shrink-0 rounded-full" style={{ background: p?.color, width: 14 * u, height: 14 * u, outline: host.knownTraitors.has(c.pid) ? `${3 * u}px solid var(--traitor)` : undefined }} />
+                    <span className="flex shrink-0 items-center justify-center rounded-full font-black text-[#0b1d2a]" style={{ background: p?.color, width: 22 * u, height: 22 * u, fontSize: 13 * u, outline: host.knownTraitors.has(c.pid) ? `${3 * u}px solid var(--traitor)` : undefined }}>
+                      {host.carNumber(c.pid)}
+                    </span>
                     <span className="truncate" style={{ opacity: p?.on === false ? 0.5 : 1 }}>{p?.name ?? "?"}</span>
                     <span className="ml-auto shrink-0 opacity-70" style={{ paddingLeft: 8 * u, fontSize: 15 * u }}>
                       {c.finishMs !== null ? "🏁" : t("race.lap", { lap: Math.min(c.lap + 1, LAPS), laps: LAPS })}
@@ -515,7 +518,7 @@ export default function HostApp() {
 
 function Settings({ s, set }: { s: MatchSettings; set: (p: Partial<MatchSettings>) => void }) {
   const row = <T,>(label: string, value: T, opts: [T, string][], pick: (v: T) => void) => (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-4xl flex-wrap items-center gap-2">
       <span className="w-32 text-right text-lg opacity-70">{label}</span>
       {opts.map(([v, text]) => (
         <button
@@ -535,7 +538,8 @@ function Settings({ s, set }: { s: MatchSettings; set: (p: Partial<MatchSettings
       {row(t("settings.traitors"), s.traitors, [[0, t("settings.auto")], [1, "1"], [2, "2"]] as [MatchSettings["traitors"], string][], (traitors) => set({ traitors }))}
       {row(t("settings.cards"), s.cards, [[1, "1"], [2, "2"]] as [MatchSettings["cards"], string][], (cards) => set({ cards }))}
       {row(t("settings.bots"), s.bots, [[true, t("settings.on")], [false, t("settings.off")]], (bots) => set({ bots }))}
-      {row(t("settings.track"), s.track, [["mix", t("settings.mix")], ...TRACKS.map((id) => [id, t(`track.${id}` as StringKey)] as [string, string])], (track) => set({ track }))}
+      {row(t("settings.track"), s.track, [["mix", t("settings.mix")], ...TRACKS.map((id) => [id, id === BEGINNER_TRACK ? `${trackName(id)} · ${t("settings.beginner")}` : trackName(id)] as [string, string])], (track) => set({ track }))}
+      {row(t("settings.mirror"), s.mirror, [["off", t("settings.off")], ["on", t("settings.on")], ["mix", t("settings.mirrorMix")]] as [MirrorSetting, string][], (mirror) => set({ mirror }))}
     </section>
   );
 }

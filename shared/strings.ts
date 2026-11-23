@@ -17,3 +17,12 @@ export function ordinal(n: number): string {
   const key = !teen && (d === 1 || d === 2 || d === 3) ? (`ordinal.${d}` as StringKey) : "ordinal.other";
   return t(key, { n });
 }
+
+/** Track name for an id; Mirror versions ("<id>~m") get a "Mirror" label. */
+export function trackName(id: string): string {
+  const mirror = id.endsWith("~m");
+  const base = mirror ? id.slice(0, -2) : id;
+  const key = `track.${base}` as StringKey;
+  const name = key in en ? t(key) : base;
+  return mirror ? t("track.mirrorName", { name }) : name;
+}

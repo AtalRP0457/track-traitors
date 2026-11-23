@@ -32,18 +32,41 @@ export interface MatchSettings {
   /** Traps each player places per race. */
   cards: 1 | 2;
   bots: boolean;
-  /** A track id, or "mix" to rotate through all of them. */
+  /** A track id, or "mix" for a shuffled set of all of them. */
   track: string;
+  /** Mirror versions (flipped left↔right): never, always, or a random half. */
+  mirror: MirrorSetting;
 }
 
-export const DEFAULT_SETTINGS: MatchSettings = { races: 3, traitors: 0, cards: 1, bots: true, track: "mix" };
+export type MirrorSetting = "off" | "on" | "mix";
+export const MIRROR_SETTINGS: MirrorSetting[] = ["off", "on", "mix"];
 
-/** Launch tracks in rotation order for "mix". Files live in public/assets/tracks/<id>.json. */
-export const TRACKS = ["sunny-cove", "coconut-harbor", "lagoon-figure8"];
+export const DEFAULT_SETTINGS: MatchSettings = { races: 3, traitors: 0, cards: 1, bots: true, track: "mix", mirror: "off" };
 
-export function trackForRace(settings: MatchSettings, race: number): string {
-  if (settings.track !== "mix" && TRACKS.includes(settings.track)) return settings.track;
-  return TRACKS[(race - 1) % TRACKS.length];
+/** All tracks, easiest first. Files live in public/assets/tracks/<id>.json; Mirror versions are "<id>~m". */
+export const TRACKS = ["sandcastle-circuit", "sunny-cove", "coconut-harbor", "lagoon-figure8", "jungle-switchback", "boardwalk-night-market", "volcano-rim"];
+/** Walled beginner track: a host's very first match starts here (in "mix"). */
+export const BEGINNER_TRACK = "sandcastle-circuit";
+
+/**
+ * The track for each race of a match. "mix" shuffles all tracks (no repeats until every track has
+ * been used); a brand-new host (no matches finished yet) starts on the beginner track.
+ */
+export function matchTracks(s: MatchSettings, races: number, firstMatch: boolean, rand: () => number = Math.random): string[] {
+  let list: string[];
+  if (s.track !== "mix" && TRACKS.includes(s.track)) list = Array(races).fill(s.track);
+  else {
+    const rest = shuffle(TRACKS.filter((id) => !firstMatch || id !== BEGINNER_TRACK), rand);
+    const order = firstMatch ? [BEGINNER_TRACK, ...rest] : rest;
+    list = Array.from({ length: races }, (_, i) => order[i % order.length]);
+  }
+  return list.map((id, i) => (s.mirror === "on" || (s.mirror === "mix" && (firstMatch && i === 0 ? false : rand() < 0.5)) ? id + "~m" : id));
+}
+
+/** Track to load before a match starts (the lobby's background). */
+export function previewTrack(s: MatchSettings, firstMatch: boolean): string {
+  if (s.track !== "mix" && TRACKS.includes(s.track)) return s.track;
+  return firstMatch ? BEGINNER_TRACK : TRACKS[1];
 }
 
 /** How many traitors: picked among phones (bots are always racers). At least one racer stays

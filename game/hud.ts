@@ -22,7 +22,6 @@ export interface HudLayout {
 /** What the scene tells the React HUD each frame (React reads it on its own refresh). */
 export interface CameraInfo {
   kind: string;
-  slowmo: boolean;
   layout: HudLayout | null;
 }
 

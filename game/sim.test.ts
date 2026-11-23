@@ -125,3 +125,31 @@ describe("race sim", () => {
     expect(standings(r).map((s) => s.pid)).toEqual(["c", "b", "a"]);
   });
 });
+
+describe("traps", () => {
+  it("only slow the car that hit them; everyone else keeps full speed", () => {
+    for (const card of ["oil", "crab", "coconut", "fake"] as const) {
+      const r = createRace(track, ["a", "b"], 2);
+      const [a, b] = r.cars;
+      // Get both cars up to speed, far apart so they can't bump.
+      for (let i = 0; i < 240; i++) {
+        drive(r, a);
+        drive(r, b);
+        step(r);
+      }
+      const ahead = pointAt(track, a.dist + 30);
+      r.traps = [{ id: 0, card, x: ahead.x, y: ahead.y, live: true }];
+      const bSpeed = b.v;
+      let hit = false;
+      for (let i = 0; i < 30; i++) {
+        drive(r, a);
+        drive(r, b);
+        step(r);
+        if (r.hits.length) hit = true;
+      }
+      expect(hit).toBe(true);
+      expect(a.v).toBeLessThan(bSpeed * 0.8);
+      expect(b.v).toBeGreaterThanOrEqual(bSpeed * 0.98);
+    }
+  });
+});

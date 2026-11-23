@@ -24,8 +24,6 @@ const FINISH_GRACE_MS = 15_000;
 const MAX_RACE_MS = 180_000;
 const MAX_STEPS_PER_FRAME = 5;
 const STAT_WINDOW = 200;
-/** Recorded poses kept for the host-only slow-motion replay (3 s of ticks). */
-const HISTORY_TICKS = 180;
 /** If the room never answers a closed vote, move on after this long. */
 const VOTE_RESULT_WAIT_MS = 3000;
 /** Static flash on the TV when someone is glitched. */
@@ -66,9 +64,6 @@ export class RaceHost {
   private applied = new Map<string, number>();
   private acked = new Map<string, number>();
   private prev = new Map<string, Pose>();
-  /** Ring of recent poses, oldest first: history[i] is the state after tick historyStart + i. */
-  private history: Map<string, Pose>[] = [];
-  private historyStart = 0;
   private acc = 0;
   private firstFinishTick: number | null = null;
   /** Bot brains for bot seats and for phones that dropped mid-race. */
@@ -87,7 +82,7 @@ export class RaceHost {
   private fpsFrames = 0;
   private fpsMs = 0;
   /** Filled by the scene each frame for the HUD. */
-  camera: CameraInfo = { kind: "wide", slowmo: false, layout: null };
+  camera: CameraInfo = { kind: "wide", layout: null };
   /** Latest event banner for the big screen (top center). Shown for BANNER_TICKS. */
   banner: { key: StringKey; vars: Record<string, string | number>; tick: number } | null = null;
   /** Dev hook: runs after every physics tick (fake-phone bots). */
@@ -271,8 +266,6 @@ export class RaceHost {
     const t = this.track!;
     this.race = createRace(t, this.roster.map((p) => p.pid), LAPS);
     this.prev.clear();
-    this.history = [];
-    this.historyStart = 1;
     this.applied.clear();
     this.acked.clear();
     this.acc = 0;
@@ -404,14 +397,6 @@ export class RaceHost {
       this.prev.set(pid, { x: c.x, y: c.y, a: c.a });
     }
 
-    const snap = new Map<string, Pose>();
-    for (const c of r.cars) snap.set(c.pid, { x: c.x, y: c.y, a: c.a });
-    this.history.push(snap);
-    if (this.history.length > HISTORY_TICKS) {
-      this.history.shift();
-      this.historyStart++;
-    }
-
     this.afterTick?.();
 
     const allDone = r.cars.every((c) => c.finishMs !== null);
@@ -429,24 +414,6 @@ export class RaceHost {
     let da = c.a - p.a;
     da = Math.atan2(Math.sin(da), Math.cos(da));
     return { x: p.x + (c.x - p.x) * t, y: p.y + (c.y - p.y) * t, a: p.a + da * t };
-  }
-
-  /** Render time in ticks (fractional): what pose() currently shows. */
-  get renderTick(): number {
-    return this.race ? this.race.tick - 1 + (this.phase === "race" ? this.acc / DT : 1) : 0;
-  }
-
-  /** Recorded pose at a fractional tick, for the slow-motion replay. Falls back to the live pose. */
-  poseAt(pid: string, tick: number): Pose | null {
-    const i = tick - this.historyStart;
-    const i0 = Math.floor(i);
-    const a = this.history[i0]?.get(pid);
-    const b = this.history[i0 + 1]?.get(pid);
-    if (!a || !b) return this.pose(pid);
-    const t = i - i0;
-    let da = b.a - a.a;
-    da = Math.atan2(Math.sin(da), Math.cos(da));
-    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: a.a + da * t };
   }
 
   /** After a frame is drawn: tell each phone which of its inputs is now on screen. */

@@ -57,7 +57,6 @@
   "banner.wins": "🏁 {name} wins!",
   "host.fullscreen": "Fullscreen",
   "host.exitFullscreen": "Exit fullscreen",
-  "host.slowmo": "Replay ×0.5",
   "host.roomShort": "Room {code}",
   "race.startMatch": "Start match",
   "race.playAgain": "Play again",

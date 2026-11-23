@@ -77,7 +77,7 @@ describe("director keeps every racing car in frame", () => {
     const d = new Director();
     const world = { x0: 0, y0: 0, x1: 1600, y1: 900 };
     const ins = { l: 0, r: 300, t: 0, b: 0 };
-    const mk = (ax: number): DirectorInput => ({ nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0, tick: 0,
+    const mk = (ax: number): DirectorInput => ({ nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0,
       cars: [car("a", ax, 200, 3000), car("slow", 150, 800, 100)], finishLine: { x: 0, y: 0 }, finishDist: 9e9, view, track, world, insets: ins });
     d.update(mk(300));
     for (let ax = 300; ax <= 1450; ax += 50) {
@@ -112,7 +112,7 @@ describe("HUD insets", () => {
   it("frames the pack in the free part of the screen, left of the positions tower", () => {
     const d = new Director();
     const cars = [car("a", 1300, 450, 900), car("b", 1100, 450, 800)];
-    const out = d.update({ nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0, tick: 0, cars, finishLine: { x: 0, y: 0 }, finishDist: 9e9,
+    const out = d.update({ nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0, cars, finishLine: { x: 0, y: 0 }, finishDist: 9e9,
       view, track, world: { x0: -2000, y0: -2000, x1: 4000, y1: 3000 }, insets: { l: 0, r: 400, t: 0, b: 0 } });
     const r = visible(out.shot);
     const freeRight = r.x1 - 400 / out.shot.zoom; // world x where the tower starts
@@ -139,7 +139,7 @@ describe("smoothing", () => {
 
 describe("director", () => {
   const base = (over: Partial<DirectorInput>): DirectorInput => ({
-    nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0, tick: 0,
+    nowMs: 0, dtMs: 16, phase: "race", countdownLeft: 0,
     cars: [car("a", 600, 300, 900), car("b", 500, 350, 800)],
     finishLine: { x: 200, y: 450 }, finishDist: 7000, view, track, world: { x0: 0, y0: 0, x1: 4000, y1: 3000 }, ...over,
   });
@@ -150,20 +150,16 @@ describe("director", () => {
     expect(d.update(base({ phase: "countdown", countdownLeft: 1000 })).kind).toBe("grid");
   });
 
-  it("trap cut: slow motion for 1.5 s, at most one per 5 s, then straight back to live", () => {
+  it("trap cut: live zoom toward the crash for 1.5 s (never slow motion), at most one per 5 s", () => {
     const d = new Director();
     d.update(base({ nowMs: 0 }));
-    expect(d.trapHit(300, 300, 1000, 60)).toBe(true);
+    expect(d.trapHit(300, 300, 1000)).toBe(true);
     const during = d.update(base({ nowMs: 1500 }));
     expect(during.kind).toBe("cut");
-    expect(during.slowmo).toEqual({ fromTick: 60, sinceMs: 1000 });
-    expect(d.trapHit(900, 300, 3000, 120)).toBe(false); // too soon
-    const after = d.update(base({ nowMs: 2600 }));
-    expect(after.kind).toBe("pack");
-    expect(after.slowmo).toBeNull();
-    // Snapped, not eased: identical to the pack target.
-    expect(after.shot).toEqual(packShot(base({}).cars, view, track)); // (well inside the world, so unclamped)
-    expect(d.trapHit(900, 300, 6100, 300)).toBe(true);
+    expect(during).not.toHaveProperty("slowmo");
+    expect(d.trapHit(900, 300, 3000)).toBe(false); // too soon
+    expect(d.update(base({ nowMs: 2600 })).kind).toBe("pack");
+    expect(d.trapHit(900, 300, 6100)).toBe(true);
   });
 
   it("goes to the finish line on the last stretch and holds after the winner crosses", () => {

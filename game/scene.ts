@@ -6,10 +6,9 @@
 //   minimap   whole track + colored dots, top-left
 
 import * as Phaser from "phaser";
-import { CAM, Director, type CarPos } from "./camera";
+import { Director, type CarPos } from "./camera";
 import { hudLayout, type HudLayout } from "./hud";
 import type { RaceHost } from "./race";
-import { DT } from "./sim";
 import { CARD_ICON } from "../shared/rules";
 import { FX } from "./sim";
 import { pointAt, trackBounds, type Track } from "./track";
@@ -129,7 +128,6 @@ class RaceScene extends Phaser.Scene {
       phase: directorPhase(this.host.phase),
       countdownLeft: this.host.countdownLeft,
       cars: live,
-      tick: this.host.renderTick,
       finishLine: { x: start.x, y: start.y },
       finishDist: (race?.laps ?? 0) * t.length,
       view: { w: this.scale.width, h: this.scale.height },
@@ -140,15 +138,12 @@ class RaceScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setZoom(out.shot.zoom).centerOn(out.shot.cx, out.shot.cy);
 
-    // Slow motion is display-only: physics keeps running, we draw recorded poses at 0.5×.
-    const replayTick = out.slowmo ? out.slowmo.fromTick + ((time - out.slowmo.sinceMs) / 1000 / DT) * CAM.slowmo : null;
-
     const seen = new Set<string>();
     const labelScale = this.layout.u / out.shot.zoom;
     if (race) {
       for (const c of race.cars) {
         seen.add(c.pid);
-        const pose = replayTick !== null ? this.host.poseAt(c.pid, replayTick)! : this.host.pose(c.pid)!;
+        const pose = this.host.pose(c.pid)!;
         const car = this.carFor(c.pid);
         // Ramp: the car grows a little while it's in the air.
         const jump = c.air > 0 ? 1 + 0.4 * Math.sin((Math.PI * (FX.air - c.air)) / FX.air) : 1;
@@ -156,8 +151,7 @@ class RaceScene extends Phaser.Scene {
         // Just respawned: blink while it can't be bumped.
         if (c.ghost > 0) car.body.setAlpha(Math.floor(time / 120) % 2 ? 0.35 : 0.9);
         car.label.setPosition(pose.x, pose.y - 24 * labelScale).setScale(labelScale);
-        const livePose = this.host.pose(c.pid)!;
-        car.dot.setPosition(livePose.x, livePose.y);
+        car.dot.setPosition(pose.x, pose.y);
       }
     }
     this.drawTraps(labelScale);
@@ -170,7 +164,6 @@ class RaceScene extends Phaser.Scene {
     }
 
     this.host.camera.kind = out.kind;
-    this.host.camera.slowmo = replayTick !== null;
   }
 
   /** Traps appear only once triggered (PLAN.md 2: invisible until a car touches one). */

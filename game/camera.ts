@@ -49,7 +49,6 @@ export const CAM = {
   cutMs: 1500,
   cutGapMs: 5000,
   cutCars: 9,
-  slowmo: 0.5,
   /** Finish shot starts when the leader is this close to the line on the last lap. */
   finishPx: 520,
   finishCars: 16,
@@ -172,8 +171,6 @@ export interface DirectorInput {
   phase: "lobby" | "countdown" | "race" | "results";
   countdownLeft: number;
   cars: CarPos[];
-  /** Physics tick right now (for the slow-motion replay). */
-  tick: number;
   finishLine: { x: number; y: number };
   /** Distance at which a car finishes (laps × track length). */
   finishDist: number;
@@ -188,22 +185,21 @@ export interface DirectorInput {
 export interface DirectorOutput {
   shot: Shot;
   kind: ShotKind;
-  /** While set, the host draws cars from recorded poses at 0.5× speed from this tick. */
-  slowmo: { fromTick: number; sinceMs: number } | null;
 }
 
-/** Picks and smooths the shot each frame: intro → grid → pack, trap cuts, finish line. */
+/** Picks and smooths the shot each frame: intro → grid → pack, trap cuts, finish line.
+ *  Everything is live: a trap cut only zooms toward the crash, it never slows the picture. */
 export class Director {
   private cur: Shot | null = null;
-  private cut: { x: number; y: number; atMs: number; tick: number } | null = null;
+  private cut: { x: number; y: number; atMs: number } | null = null;
   private lastCutMs = -Infinity;
   private firstFinishMs: number | null = null;
   private lastPhase = "";
 
   /** A trap went off at (x, y). Returns false if a cut happened less than 5 s ago. */
-  trapHit(x: number, y: number, nowMs: number, tick: number): boolean {
+  trapHit(x: number, y: number, nowMs: number): boolean {
     if (nowMs - this.lastCutMs < CAM.cutGapMs) return false;
-    this.cut = { x, y, atMs: nowMs, tick };
+    this.cut = { x, y, atMs: nowMs };
     this.lastCutMs = nowMs;
     return true;
   }
@@ -218,7 +214,6 @@ export class Director {
     let target: Shot;
     let snap = false;
     let k = { pos: CAM.kPos, zoom: CAM.kZoom };
-    let slowmo: DirectorOutput["slowmo"] = null;
 
     if (i.phase !== this.lastPhase) {
       if (i.phase === "countdown") {
@@ -248,12 +243,8 @@ export class Director {
       kind = "cut";
       target = closeShot(this.cut.x, this.cut.y, CAM.cutCars, v, track);
       k = { pos: CAM.kCut, zoom: CAM.kCut };
-      slowmo = { fromTick: this.cut.tick, sinceMs: this.cut.atMs };
     } else {
-      if (this.cut) {
-        this.cut = null;
-        snap = true; // cut straight back to live
-      }
+      this.cut = null;
       const nearLine = leader.dist >= i.finishDist - CAM.finishPx;
       const holding = this.firstFinishMs !== null && i.nowMs - this.firstFinishMs < CAM.finishHoldMs;
       if ((nearLine && this.firstFinishMs === null) || holding) {
@@ -275,11 +266,11 @@ export class Director {
     const w = i.world;
     target = clampToWorld(target, full, { x0: w.x0 - ins.l / z, y0: w.y0 - ins.t / z, x1: w.x1 + ins.r / z, y1: w.y1 + ins.b / z });
     this.cur = !this.cur || snap ? target : follow(this.cur, target, i.dtMs, k.pos, k.zoom);
-    // Everyone still racing stays on screen in every live shot (not the short trap replay or the intro).
-    if (kind === "pack" || kind === "finish" || kind === "grid") {
+    // Everyone still racing stays on screen in every live shot (not the intro).
+    if (kind === "pack" || kind === "finish" || kind === "grid" || kind === "cut") {
       const racing = i.cars.filter((c) => !c.finished);
       this.cur = contain(this.cur, racing, full, ins, CAM.containPx);
     }
-    return { shot: this.cur, kind, slowmo };
+    return { shot: this.cur, kind };
   }
 }

@@ -61,7 +61,7 @@ export default function HostApp() {
     const h = new RaceHost(null, (m) => tx(m), rerender, analytics.log);
     h.settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<MatchSettings>>(SETTINGS_KEY) };
     h.loadTrack = fetchTrack;
-    h.onTrapCut = (x, y) => director.trapHit(x, y, performance.now(), h.renderTick);
+    h.onTrapCut = (x, y) => director.trapHit(x, y, performance.now());
     hostRef.current = h;
   }
   const host = hostRef.current;
@@ -235,7 +235,7 @@ export default function HostApp() {
       if (k === "t" && process.env.NODE_ENV !== "production" && host.race) {
         const lead = host.race.cars.reduce((a, b) => (b.dist > a.dist ? b : a));
         const p = host.pose(lead.pid)!;
-        director.trapHit(p.x, p.y, performance.now(), host.renderTick);
+        director.trapHit(p.x, p.y, performance.now());
       }
     };
     const onFs = () => setFullscreen(!!document.fullscreenElement);
@@ -385,11 +385,6 @@ export default function HostApp() {
           {showBanner && (
             <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-black/65 font-black" style={{ top: L.pad, padding: `${8 * u}px ${24 * u}px`, fontSize: 36 * u }}>
               {t(host.banner!.key, host.banner!.vars)}
-            </div>
-          )}
-          {cam.slowmo && (
-            <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 rounded bg-[var(--traitor)] font-black uppercase tracking-widest text-black" style={{ top: L.pad + 80 * u, padding: `${2 * u}px ${10 * u}px`, fontSize: 16 * u }}>
-              {t("host.slowmo")}
             </div>
           )}
 
@@ -638,8 +633,7 @@ function DebugPanel({ host, players, net, style }: { host: RaceHost; players: Pl
         </div>
       ))}
       <div className="opacity-60">
-        camera: {host.camera.kind}
-        {host.camera.slowmo && " (slow-mo)"} · D hide · T test trap cut
+        camera: {host.camera.kind} · D hide · T test trap cut
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ import {
 import type { StringKey } from "../shared/strings";
 import { botSteer, newBrain, type BotBrain } from "./bot";
 import type { CameraInfo } from "./hud";
+import type { SoundName } from "./sound";
 import { createRace, DT, FX, standings, step, type RaceState } from "./sim";
 import type { Track } from "./track";
 import { raceClues, snapTrap } from "./traps";
@@ -95,8 +96,9 @@ export class RaceHost {
   afterTick?: () => void;
   /** Called when a harmful trap goes off at (x, y): the scene cuts the camera there. */
   onTrapCut?: (x: number, y: number) => void;
-  /** A lava crack or crab crowd got a car (for sound). */
-  onHazard?: (kind: "lava" | "crabs") => void;
+  /** Sound effects on the big screen. */
+  sound?: (s: SoundName) => void;
+  private lastBeep = 0;
   /** Loads a track by id (fetch + build). Without it every race uses the current track. */
   loadTrack?: (id: string) => Promise<Track>;
   /** Per-match numbers for analytics. */
@@ -191,6 +193,7 @@ export class RaceHost {
     car.glitch = FX.glitch;
     this.raceLog.glitched.push(target);
     this.glitchFlash = r.tick + GLITCH_FLASH_TICKS;
+    this.sound?.("glitch");
     this.banner = { key: "banner.glitch", vars: { name: this.name(target) }, tick: r.tick };
   }
 
@@ -198,6 +201,7 @@ export class RaceHost {
     if (this.phase !== "vote") return;
     this.voteResult = { caught, traitor };
     if (caught && traitor) this.knownTraitors.add(caught);
+    if (caught) this.sound?.(traitor ? "caught" : "innocent");
     this.log({ e: "vote_result", caught: caught && traitor ? 1 : 0, traitors: this.knownTraitors.size });
     this.setPhase("reveal", REVEAL_MS);
   }
@@ -211,6 +215,7 @@ export class RaceHost {
   onReact(pid: string, e: number, nowMs: number) {
     this.reactions.push({ id: this.nextReact++, e, pid, atMs: nowMs });
     if (this.reactions.length > 30) this.reactions.shift();
+    this.sound?.("react");
   }
 
   // ---------- match flow ----------
@@ -350,6 +355,11 @@ export class RaceHost {
     if (this.phase !== "race") {
       if (["role", "draft", "countdown", "results", "vote", "reveal"].includes(this.phase)) {
         this.phaseLeft -= deltaMs;
+        if (this.phase === "countdown") {
+          const sec = Math.ceil(this.phaseLeft / 1000);
+          if (sec !== this.lastBeep && sec > 0) this.sound?.("beep");
+          this.lastBeep = sec;
+        }
         if (this.voteEndAt !== null && this.phase === "vote") this.voteEndAt -= deltaMs;
         const allDone = (this.phase === "draft" || this.phase === "vote") && this.progress.of > 0 && this.progress.n >= this.progress.of;
         if (this.phaseLeft <= 0 || allDone) this.advance();
@@ -397,7 +407,9 @@ export class RaceHost {
         this.banner = { key: "banner.wins", vars: { name }, tick: r.tick };
       } else if (car.lap === r.laps - 1 && r.cars.every((c) => c === car || c.lap < car.lap)) {
         this.banner = { key: "banner.finalLap", vars: { name }, tick: r.tick };
-      }
+        this.sound?.("finalLap");
+      } else this.sound?.("lap");
+      if (car.finishMs !== null && r.tick === this.firstFinishTick) this.sound?.("finish");
     }
 
     for (const h of r.hits) {
@@ -405,13 +417,14 @@ export class RaceHost {
       this.send({ v: 1, t: "hit", trap: h.trap, car: h.pid });
       this.raceLog.hits.push({ card: trap.card, pid: h.pid });
       this.banner = { key: `hit.${trap.card}` as StringKey, vars: { name: this.name(h.pid) }, tick: r.tick };
+      this.sound?.(`trap.${trap.card}`);
       if (HARMFUL.has(trap.card)) this.onTrapCut?.(trap.x, trap.y);
     }
 
     // Lava cracks and crab crowds: public, so the TV says who got caught.
     for (const h of r.hazardHits) {
       this.banner = { key: h.kind === "lava" ? "hit.lava" : "hit.crabs", vars: { name: this.name(h.pid) }, tick: r.tick };
-      this.onHazard?.(h.kind);
+      this.sound?.(h.kind);
     }
 
     // A respawned car jumps; don't draw it gliding across the map.
@@ -487,6 +500,9 @@ export class RaceHost {
 
   private setPhase(phase: Phase, ms = 0) {
     this.phase = phase;
+    const cue: Partial<Record<Phase, SoundName>> = { race: "go", draft: "draft", vote: "vote", podium: "podium" };
+    if (cue[phase]) this.sound?.(cue[phase]!);
+    if (phase === "countdown") this.lastBeep = 0;
     this.phaseLeft = ms;
     this.sendPhase();
     this.onChange();

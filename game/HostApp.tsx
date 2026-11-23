@@ -12,6 +12,7 @@ import { parseMsg, type AnyMsg, type Clue, type LobbyMsg, type PlayerInfo } from
 import type { PartySocket } from "partysocket";
 import { Director } from "./camera";
 import { DevBotRelay } from "./devbots";
+import { Sfx } from "./sound";
 import { percentile, RaceHost } from "./race";
 import { fetchTrackFile } from "@/shared/track-format";
 import { buildTrack, type Track } from "./track";
@@ -45,6 +46,8 @@ export default function HostApp() {
   const wsRef = useRef<PartySocket | null>(null);
   const hostRef = useRef<RaceHost | null>(null);
   const director = useRef(new Director()).current;
+  const sfx = useRef<Sfx | null>(null);
+  if (!sfx.current && typeof window !== "undefined") sfx.current = new Sfx();
   const [fullscreen, setFullscreen] = useState(false);
   const [cursorHidden, setCursorHidden] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -61,6 +64,7 @@ export default function HostApp() {
     h.settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<MatchSettings>>(SETTINGS_KEY) };
     h.matchesPlayed = store.get<number>(MATCHES_KEY) ?? 0;
     h.onMatchDone = () => store.set(MATCHES_KEY, h.matchesPlayed);
+    h.sound = (name) => sfx.current?.play(name);
     h.loadTrack = fetchTrack;
     h.onTrapCut = (x, y) => director.trapHit(x, y, performance.now());
     hostRef.current = h;
@@ -232,6 +236,7 @@ export default function HostApp() {
       const k = e.key.toLowerCase();
       if (k === "d") setShowDebug((s) => !s);
       if (k === "f") toggleFullscreen();
+      if (k === "m") toggleMute();
       // Dev: fake a trap hit on the leader to try the trap-cut camera before traps exist.
       if (k === "t" && process.env.NODE_ENV !== "production" && host.race) {
         const lead = host.race.cars.reduce((a, b) => (b.dist > a.dist ? b : a));
@@ -253,6 +258,7 @@ export default function HostApp() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const wake = () => {
+      sfx.current?.unlock();
       setCursorHidden(false);
       clearTimeout(timer);
       timer = setTimeout(() => setCursorHidden(true), 3000);
@@ -260,12 +266,23 @@ export default function HostApp() {
     wake();
     window.addEventListener("pointermove", wake);
     window.addEventListener("pointerdown", wake);
+    window.addEventListener("keydown", wake);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("pointermove", wake);
       window.removeEventListener("pointerdown", wake);
+      window.removeEventListener("keydown", wake);
     };
   }, []);
+
+  const [muted, setMuted] = useState(false);
+  useEffect(() => setMuted(sfx.current?.muted ?? false), []);
+  function toggleMute() {
+    const m = !(sfx.current?.muted ?? false);
+    sfx.current?.unlock();
+    sfx.current?.setMuted(m);
+    setMuted(m);
+  }
 
   const newRoom = () => {
     store.del(HOST_KEY);
@@ -413,11 +430,13 @@ export default function HostApp() {
             {t("host.roomShort", { code: code ?? "" })}
           </span>
           <FullscreenButton on={fullscreen} u={u} />
+          <MuteButton muted={muted} u={u} onToggle={toggleMute} />
         </div>
       )}
       {phase === "lobby" && (
         <div className="absolute bottom-4 left-4 z-10">
           <FullscreenButton on={fullscreen} u={1} />
+          <span className="ml-3"><MuteButton muted={muted} u={1} onToggle={toggleMute} /></span>
         </div>
       )}
 
@@ -591,6 +610,14 @@ function FullscreenButton({ on, u }: { on: boolean; u: number }) {
       aria-label={on ? t("host.exitFullscreen") : t("host.fullscreen")}
     >
       {on ? "⤡" : "⤢"} {on ? t("host.exitFullscreen") : t("host.fullscreen")} <span className="opacity-50">(F)</span>
+    </button>
+  );
+}
+
+function MuteButton({ muted, u, onToggle }: { muted: boolean; u: number; onToggle: () => void }) {
+  return (
+    <button onClick={onToggle} className="rounded-lg bg-black/55 font-bold" style={{ padding: `${4 * u}px ${12 * u}px`, fontSize: 18 * u }} aria-label={muted ? t("host.soundOn") : t("host.soundOff")}>
+      {muted ? "🔇" : "🔊"} <span className="opacity-50">(M)</span>
     </button>
   );
 }

@@ -178,5 +178,7 @@
   "privacy.kids": "The game is designed to be safe for all ages (no chat, no personal data), but it is not directed at children under 13.",
   "privacy.contactTitle": "Contact",
   "privacy.contact": "Questions or requests about your data: use the contact address on our store listing or website.",
-  "privacy.back": "Back to the game"
+  "privacy.back": "Back to the game",
+  "coach.steer": "Hold ◀ to turn left, ▶ to turn right",
+  "coach.gas": "Gas is automatic. Watch your car on the TV!"
 }

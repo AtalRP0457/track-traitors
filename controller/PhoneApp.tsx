@@ -17,6 +17,8 @@ import { Draft, GlitchPicker, Reactions, RoleCard, Tap, Vote, type Seat as SeatI
 type Seat = { pid: string; seat: string; name: string; color: string };
 const seatKey = (code: string) => `tt-seat-${code}`;
 const MY_SCREEN_KEY = "tt-myscreen";
+/** Set once this phone has finished a race: no more first-race coaching. */
+const COACHED_KEY = "tt-coached";
 /** Local crash animation word per trap card / hazard (nothing streamed). */
 const BONK: Record<string, string> = { oil: "SPLAT!", crab: "PINCH!", coconut: "BONK!", fake: "FIZZLE…", boost: "ZOOM!", ramp: "WHEE!", lava: "HOT HOT!", crabs: "CRABS!" };
 
@@ -57,6 +59,8 @@ export default function PhoneApp() {
   const [bonk, setBonk] = useState<{ kind: string; at: number } | null>(null);
   const [visible, setVisible] = useState(true);
   const snaps = useRef(new SnapStore()).current;
+  // First race on this phone: a short "how to steer" hint until the first press.
+  const [coach, setCoach] = useState(false);
   const wsRef = useRef<PartySocket | null>(null);
   // Dev: ?lag=&jitter=&loss= on the /play URL simulates a bad network on this phone.
   const sim = useRef<NetSim | null>(null);
@@ -242,6 +246,7 @@ export default function PhoneApp() {
 
   useEffect(() => {
     setMyScreen(store.get<boolean>(MY_SCREEN_KEY) === true);
+    setCoach(store.get<boolean>(COACHED_KEY) !== true);
     const onVis = () => setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
@@ -280,7 +285,16 @@ export default function PhoneApp() {
     return () => clearInterval(id);
   }, [phase]);
 
+  useEffect(() => {
+    if (phase === "results" && coach) {
+      store.set(COACHED_KEY, true);
+      setCoach(false);
+    }
+  }, [phase, coach]);
+  const [steered, setSteered] = useState(false);
+
   const steer = (s: -1 | 0 | 1, at: number) => {
+    if (s !== 0 && !steered) setSteered(true);
     const k = ++input.current.k;
     input.current.s = s;
     touchAt.current.set(k, at);
@@ -427,6 +441,12 @@ export default function PhoneApp() {
             {status}
           </span>
         </div>
+        {coach && !steered && (
+          <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl bg-black/75 p-4 text-center text-2xl font-black">
+            {t("coach.steer")}
+            <div className="mt-1 text-lg font-bold opacity-80">{t("coach.gas")}</div>
+          </div>
+        )}
         {bonk && performance.now() - bonk.at < 1000 && (
           <div key={bonk.at} className="bonk pointer-events-none absolute inset-x-0 top-1/4 text-center text-7xl font-black" style={{ color: "var(--traitor)" }}>
             {BONK[bonk.kind] ?? "BONK!"}

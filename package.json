@@ -11,7 +11,9 @@
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p party",
-    "tracks": "tsx scripts/build-track-images.ts"
+    "tracks": "tsx scripts/build-track-images.ts",
+    "make-tracks": "tsx scripts/make-tracks.ts && npm run tracks",
+    "deploy:party": "wrangler deploy"
   },
   "dependencies": {
     "next": "^16.4.6",

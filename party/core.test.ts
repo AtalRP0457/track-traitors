@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { AnyMsg } from "../shared/protocol";
-import { RoomCore, type RoomIO } from "./core";
+import { RATE, RoomCore, type RoomIO } from "./core";
 
 function setup(rand: () => number = Math.random) {
   const sent: { to: string; msg: AnyMsg }[] = [];
@@ -93,6 +93,22 @@ describe("RoomCore", () => {
     r.msg("H", { t: "bonk", p: a.pid, kind: "lava" });
     expect(r.last("A", "bonk")).toEqual({ v: 1, t: "bonk", kind: "lava" });
     expect(r.last("B", "bonk")).toBeUndefined();
+  });
+
+  it("rate-limits a flooding phone, then disconnects it; normal play is never limited", () => {
+    const a = joinPhone("A");
+    const inputs = () => r.sent.filter((x) => x.to === "H" && x.msg.t === "in").length;
+    // Normal: 20 steering changes a second for 5 s all get through.
+    for (let i = 0; i < 100; i++) {
+      r.clock.t += 50;
+      r.msg("A", { t: "in", s: i % 2 ? 1 : -1, b: 0, g: 0, k: i });
+    }
+    expect(inputs()).toBe(100);
+    // Flood: 1000 messages at once.
+    for (let i = 0; i < 1000; i++) r.msg("A", { t: "in", s: 1, b: 0, g: 0, k: 1000 + i });
+    expect(inputs()).toBeLessThan(100 + RATE.burst + 1);
+    expect(r.closed).toContain("A");
+    void a;
   });
 
   it("forwards input to the host with the sender pid", () => {

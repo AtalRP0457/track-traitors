@@ -7,6 +7,8 @@ import { RoomCore } from "./core";
 
 interface Env {
   Room: DurableObjectNamespace<Room>;
+  /** Cloudflare rate limiter (wrangler.jsonc). Optional so tests/old configs still run. */
+  CONNECT_LIMIT?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
 
 export class Room extends Server<Env> {
@@ -71,7 +73,15 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     return (
       (await routePartykitRequest(request, env, {
-        onBeforeConnect: (_req, { name }) => (isValidCode(name) ? undefined : new Response("Bad room code", { status: 400 })),
+        onBeforeConnect: async (req, { name }) => {
+          if (!isValidCode(name)) return new Response("Bad room code", { status: 400 });
+          const ip = req.headers.get("cf-connecting-ip") ?? "local";
+          try {
+            const { success } = (await env.CONNECT_LIMIT?.limit({ key: ip })) ?? { success: true };
+            if (!success) return new Response("Too many connections, slow down", { status: 429 });
+          } catch {} // limiter unavailable: never block play
+          return undefined;
+        },
       })) || new Response("Not found", { status: 404 })
     );
   },

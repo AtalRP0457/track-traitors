@@ -1,7 +1,7 @@
 "use client";
 
 import QRCode from "qrcode";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { analytics } from "@/shared/analytics";
 import { LAPS, MAX_PLAYERS, randomCode } from "@/shared/constants";
 import { BEGINNER_TRACK, DEFAULT_SETTINGS, previewTrack, REACTIONS, TRACKS, type MatchSettings, type MirrorSetting } from "@/shared/rules";
@@ -13,6 +13,8 @@ import type { PartySocket } from "partysocket";
 import { Director } from "./camera";
 import { DevBotRelay } from "./devbots";
 import { Sfx } from "./sound";
+import AdBreak from "./AdBreak";
+import { adDue } from "@/shared/ads";
 import { percentile, RaceHost } from "./race";
 import { fetchTrackFile } from "@/shared/track-format";
 import { buildTrack, type Track } from "./track";
@@ -115,7 +117,7 @@ export default function HostApp() {
           host.onStat(String(m.p), Number(m.tt));
           break;
         case "start":
-          host.start();
+          startRef.current();
           break;
         case "viewers":
           host.onViewers(Number(m.n));
@@ -278,6 +280,22 @@ export default function HostApp() {
     };
   }, []);
 
+  // Ads (PLAN.md 6): only here, between matches, after the first 20 matches on this device.
+  const [adThen, setAdThen] = useState<(() => void) | null>(null);
+  const startRef = useRef(() => {});
+  startRef.current = () => {
+    if (adThen || (host.phase !== "lobby" && host.phase !== "podium")) return;
+    if (adDue(host.matchesPlayed, navigator.onLine)) setAdThen(() => () => host.start());
+    else host.start();
+  };
+  const adThenRef = useRef(adThen);
+  adThenRef.current = adThen;
+  const adDone = useCallback(() => {
+    const go = adThenRef.current;
+    setAdThen(null);
+    go?.();
+  }, []);
+
   const [muted, setMuted] = useState(false);
   useEffect(() => setMuted(sfx.current?.muted ?? false), []);
   function toggleMute() {
@@ -340,7 +358,7 @@ export default function HostApp() {
           <Settings s={host.settings} set={setSetting} />
           <div className="flex items-center gap-6">
             <button
-              onClick={() => host.start()}
+              onClick={() => startRef.current()}
               disabled={!lobby || lobby.players.length === 0 || !host.track}
               className="rounded-2xl px-8 py-4 text-2xl font-black text-black disabled:opacity-30"
               style={{ background: "var(--racer)" }}
@@ -510,7 +528,7 @@ export default function HostApp() {
               : t(host.knownTraitors.size > 1 ? "podium.traitors" : "podium.traitor", { names: [...host.knownTraitors].map((p) => host.name(p)).join(", ") })}
           </p>
           <div className="flex gap-4">
-            <button onClick={() => host.start()} className="rounded-2xl px-8 py-4 text-2xl font-black text-black" style={{ background: "var(--racer)" }}>
+            <button onClick={() => startRef.current()} className="rounded-2xl px-8 py-4 text-2xl font-black text-black" style={{ background: "var(--racer)" }}>
               {t("race.playAgain")}
             </button>
             <button onClick={() => host.backToLobby()} className="rounded-2xl border-2 px-8 py-4 text-2xl font-bold" style={{ borderColor: "var(--racer)" }}>
@@ -523,6 +541,8 @@ export default function HostApp() {
       {phase !== "lobby" && lobby && !online && (
         <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{t("host.lostServer")}</div>
       )}
+
+      {adThen && <AdBreak onDone={adDone} />}
 
       {trackError && <div className="absolute inset-x-0 top-0 bg-red-600 p-2 text-center font-bold">{trackError}</div>}
 

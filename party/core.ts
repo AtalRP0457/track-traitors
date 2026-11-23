@@ -41,7 +41,11 @@ interface Player {
   view: boolean;
 }
 
-type ConnRole = { kind: "host" } | { kind: "phone"; pid: string | null };
+type ConnRole = { kind: "host" } | { kind: "phone"; pid: string | null; budget: number; at: number; dropped: number };
+
+/** Phone message budget: a burst of 40, refilled at 30/s (steering changes + heartbeat + pings
+ *  are far below this). Over budget = dropped; a phone that keeps flooding is disconnected. */
+export const RATE = { burst: 40, perSec: 30, kickAfter: 400 };
 
 const STEER = new Set([-1, 0, 1]);
 
@@ -73,7 +77,7 @@ export class RoomCore {
   }
 
   connect(connId: string, role: "host" | "phone") {
-    this.conns.set(connId, role === "host" ? { kind: "host" } : { kind: "phone", pid: null });
+    this.conns.set(connId, role === "host" ? { kind: "host" } : { kind: "phone", pid: null, budget: RATE.burst, at: this.now(), dropped: 0 });
   }
 
   disconnect(connId: string) {
@@ -105,8 +109,22 @@ export class RoomCore {
     const role = this.conns.get(connId);
     const m = parseMsg(raw);
     if (!role || !m) return;
+    if (role.kind === "phone" && !this.spend(connId, role)) return;
     if (role.kind === "host") this.fromHost(connId, m);
     else this.fromPhone(connId, role, m);
+  }
+
+  /** Token bucket per phone connection. */
+  private spend(connId: string, r: { budget: number; at: number; dropped: number }): boolean {
+    const now = this.now();
+    r.budget = Math.min(RATE.burst, r.budget + ((now - r.at) / 1000) * RATE.perSec);
+    r.at = now;
+    if (r.budget >= 1) {
+      r.budget -= 1;
+      return true;
+    }
+    if (++r.dropped >= RATE.kickAfter) this.io.close(connId);
+    return false;
   }
 
   // ---------- host ----------

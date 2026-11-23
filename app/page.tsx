@@ -18,6 +18,9 @@ export default function Home() {
           {t("home.join")}
         </Link>
       </div>
+      <Link href="/privacy" className="text-sm underline opacity-60">
+        {t("privacy.link")}
+      </Link>
     </main>
   );
 }

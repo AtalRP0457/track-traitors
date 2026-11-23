@@ -6,5 +6,8 @@
   "durable_objects": {
     "bindings": [{ "name": "Room", "class_name": "Room" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  // Connections (joins, reconnects, new rooms) per IP: 120 a minute is plenty (a whole party shares one Wi-Fi IP) for a party,
+  // stops scripts from creating rooms or hammering joins (PLAN.md 8).
+  "ratelimits": [{ "name": "CONNECT_LIMIT", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } }]
 }

@@ -3,6 +3,7 @@ import { CODE_ALPHABET, isValidCode, randomCode } from "./constants";
 import { isListName, randomName } from "./names";
 import { parseMsg, type ErrorMsg } from "./protocol";
 import { ordinal, t, trackName } from "./strings";
+import { adDue, FREE_MATCHES } from "./ads";
 import { BEGINNER_TRACK, DEFAULT_SETTINGS, matchTracks, TRACKS } from "./rules";
 import en from "../strings/en.json";
 
@@ -66,5 +67,14 @@ describe("match tracks", () => {
   it("names Mirror versions", () => {
     expect(trackName("volcano-rim~m")).toBe("Volcano Rim (Mirror)");
     expect(trackName("sandcastle-circuit")).toBe("Sandcastle Circuit");
+  });
+});
+
+describe("ads rule", () => {
+  it("no ads for the first 20 matches, then between matches; never offline", () => {
+    for (let n = 0; n < FREE_MATCHES; n++) expect(adDue(n)).toBe(false);
+    expect(adDue(20)).toBe(true); // 20 done → before match 21
+    expect(adDue(57)).toBe(true);
+    expect(adDue(57, false)).toBe(false);
   });
 });

@@ -339,16 +339,16 @@ export default function HostApp() {
 
       {phase === "lobby" && (
         <Overlay>
-          <div className="flex flex-wrap items-center justify-center gap-12">
+          <div className="flex flex-wrap items-center justify-center gap-10">
             <div className="text-center">
               <div className="text-xl uppercase tracking-widest opacity-70">{t("host.roomCode")}</div>
-              <div className="font-mono text-8xl font-black tracking-[0.2em]">{code ?? "····"}</div>
+              <div className="font-mono text-7xl font-black tracking-[0.2em]">{code ?? "····"}</div>
               <div className="mt-2 text-lg opacity-70">{joinUrl}</div>
               <div className="mt-2 text-sm">
                 <span className={online ? "text-green-400" : "text-red-400"}>●</span> {online ? t("host.serverOk") : t("host.serverWait")}
               </div>
             </div>
-            {qr && <img src={qr} alt={t("host.qrAlt")} className="h-72 w-72 rounded-2xl bg-white p-2" />}
+            {qr && <img src={qr} alt={t("host.qrAlt")} className="h-52 w-52 rounded-2xl bg-white p-2" />}
           </div>
           <section className="w-full max-w-3xl">
             <h2 className="mb-3 text-2xl font-bold">{t("host.players", { n: lobby?.players.length ?? 0, max: MAX_PLAYERS })}</h2>
@@ -566,7 +566,7 @@ function Settings({ s, set }: { s: MatchSettings; set: (p: Partial<MatchSettings
         <button
           key={String(v)}
           onClick={() => pick(v)}
-          className="rounded-lg px-4 py-1 text-lg font-bold"
+          className="rounded-lg px-3 py-0.5 text-base font-bold"
           style={v === value ? { background: "var(--racer)", color: "black" } : { background: "rgba(255,255,255,0.1)" }}
         >
           {text}
@@ -575,7 +575,7 @@ function Settings({ s, set }: { s: MatchSettings; set: (p: Partial<MatchSettings
     </div>
   );
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-1.5">
       {row(t("settings.races"), s.races, [[1, "1"], [3, "3"], [5, "5"]] as [MatchSettings["races"], string][], (races) => set({ races }))}
       {row(t("settings.traitors"), s.traitors, [[0, t("settings.auto")], [1, "1"], [2, "2"]] as [MatchSettings["traitors"], string][], (traitors) => set({ traitors }))}
       {row(t("settings.cards"), s.cards, [[1, "1"], [2, "2"]] as [MatchSettings["cards"], string][], (cards) => set({ cards }))}
@@ -646,7 +646,7 @@ function MuteButton({ muted, u, onToggle }: { muted: boolean; u: number; onToggl
 }
 
 function Overlay({ children }: { children: React.ReactNode }) {
-  return <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 overflow-auto bg-[#0b1d2a]/85 p-8">{children}</div>;
+  return <div className="absolute inset-0 flex flex-col items-center justify-center-safe gap-6 overflow-auto bg-[#0b1d2a]/85 p-6">{children}</div>;
 }
 
 function PlayerGrid({ players, vip }: { players: PlayerInfo[]; vip: string | null }) {
